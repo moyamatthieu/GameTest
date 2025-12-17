@@ -1,0 +1,13 @@
+{
+  "name": "game-test",
+  "version": "1.0.0",
+  "description": "Projet 3D multijoueur P2P avec Three.js et Gun.js",
+  "private": true,
+  "scripts": {
+    "relay": "node server.js",
+    "dev": "python3 -m http.server 8080"
+  },
+  "dependencies": {
+    "gun": "^0.2020.1240"
+  }
+}

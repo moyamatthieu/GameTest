@@ -21,246 +21,45 @@
             background: rgba(0, 0, 0, 0.5);
             padding: 10px;
             border-radius: 5px;
+            z-index: 100;
+        }
+        #nameInput {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-size: 12px;
+            width: 100px;
+        }
+        #nameInput:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.6);
         }
     </style>
 </head>
 <body>
     <div id="info">
         🎮 ZQSD pour bouger | Souris pour regarder<br>
-        <span id="playerCount">Joueurs connectés: 0</span><br>
-        <span id="playerId">Votre ID: ...</span>
+        <span id="playerCount">Joueurs connectés: 1</span><br>
+        <span id="playerName">Pseudo: <input type="text" id="nameInput" placeholder="Anonyme" maxlength="15" /></span><br>
+        <span id="roomInfo">Salle: ...</span>
     </div>
 
-    <!-- Gun.js pour P2P décentralisé -->
-    <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
-
-    <!-- Three.js via CDN - Pas besoin de Node.js ! -->
+    <!-- Three.js via CDN (module import) -->
     <script type="importmap">
         {
             "imports": {
                 "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
-                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+                "yjs": "https://cdn.jsdelivr.net/npm/yjs@13.6.11/+esm",
+                "y-webrtc": "https://cdn.jsdelivr.net/npm/y-webrtc@10.3.0/+esm",
+                "y-indexeddb": "https://cdn.jsdelivr.net/npm/y-indexeddb@9.0.12/+esm",
+                "lib0/": "https://cdn.jsdelivr.net/npm/lib0@0.2.94/"
             }
         }
     </script>
 
-    <script type="module">
-        import * as THREE from 'three';
-
-        // ===== CONFIGURATION GUN.JS P2P =====
-        // Serveur de relais public (vous pouvez utiliser le vôtre)
-        const gun = Gun(['https://gun-manhattan.herokuapp.com/gun']);
-        
-        // ID unique du joueur
-        const playerId = 'player_' + Math.random().toString(36).substr(2, 9);
-        document.getElementById('playerId').textContent = 'Votre ID: ' + playerId;
-
-        // Base de données du monde partagé
-        const worldData = gun.get('threejs_world_v1');
-        const playersData = worldData.get('players');
-
-        // Stockage local des autres joueurs
-        const otherPlayers = {};
-        let playerCount = 0;
-
-        // ===== CONFIGURATION THREE.JS =====
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x1a1a2e);
-        scene.fog = new THREE.Fog(0x1a1a2e, 10, 50);
-
-        // Caméra (première personne)
-        const camera = new THREE.PerspectiveCamera(
-            75,
-            window.innerWidth / window.innerHeight,
-            0.1,
-            1000
-        );
-        camera.position.set(0, 1.6, 5); // Hauteur yeux
-
-        // Renderer
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
-        document.body.appendChild(renderer.domElement);
-
-        // Verrouillage du pointeur pour contrôles FPS
-        renderer.domElement.addEventListener('click', () => {
-            renderer.domElement.requestPointerLock();
-        });
-
-        // Lumières6);
-        scene.add(ambientLight);
-
-        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        dirLight.position.set(5, 10, 5);
-        scene.add(dirLight);
-
-        // ===== SOL =====
-        const groundGeometry = new THREE.PlaneGeometry(100, 100);
-        const groundMaterial = new THREE.MeshStandardMaterial({ 
-            color: 0x2c3e50,
-            roughness: 0.8
-        });
-        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-        ground.rotation.x = -Math.PI / 2;
-        scene.add(ground);
-
-        // Grille
-        const gridHelper = new THREE.GridHelper(100, 50, 0x00ff88, 0x444444);
-        scene.add(gridHelper);
-
-        // ===== OBSTACLES (monde partagé) =====
-        for (let i = 0; i < 10; i++) {
-            const boxGeo = new THREE.BoxGeometry(2, 2, 2);
-            const boxMat = new THREE.MeshStandardMaterial({ 
-                color: Math.random() * 0xffffff 
-            });
-            const box = new THREE.Mesh(boxGeo, boxMat);
-            box.position.set(
-                Math.random() * 40 - 20,
-                1,
-                Math.random() * 40 - 20
-            );
-            scene.add(box);
-        }= -2;
-        scene.add(gridHelper);
-
-        // Animation
-        function animate() {
-            requestAnimationFrame(animate);
-
-            // Rotation des objets
-            cube.rotation.x += 0.01;
-            cube.rotation.y += 0.01;
-
-           ===== CONTRÔLES CLAVIER/SOURIS =====
-        const keys = {};
-        const moveSpeed = 0.1;
-        const rotSpeed = 0.002;
-
-        document.addEventListener('keydown', (e) => keys[e.key.toLowerCase()] = true);
-        document.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
-
-        let yaw = 0; // Rotation horizontale
-        let pitch = 0; // Rotation verticale
-
-        document.addEventListener('mousemove', (e) => {
-            if (document.pointerLockElement) {
-                yaw -= e.movementX * rotSpeed;
-                pitch -= e.movementY * rotSpeed;
-                pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
-            }
-        });
-
-        // ===== CRÉATION JOUEUR (capsule) =====
-        function createPlayerMesh(color = 0xff6b6b) {
-            const group = new THREE.Group();
-            
-            // Corps (capsule)
-            const bodyGeo = new THREE.CapsuleGeometry(0.3, 1, 8, 16);
-            const bodyMat = new THREE.MeshStandardMaterial({ color });
-            const body = new THREE.Mesh(bodyGeo, bodyMat);
-            body.position.y = 1;
-            group.add(body);
-
-            // Indicateur de direction
-            const arrowGeo = new THREE.ConeGeometry(0.2, 0.5, 8);
-            const arrowMat = new THREE.MeshStandardMaterial({ color: 0xffff00 });
-            const arrow = new THREE.Mesh(arrowGeo, arrowMat);
-            arrow.position.set(0, 1.5, 0.4);
-            arrow.rotation.x = Math.PI / 2;
-            group.add(arrow);
-
-            return group;
-        }
-
-        // ===== SYNCHRONISATION GUN.JS =====
-        
-        // Écouter les nouveaux joueurs
-        playersData.map().on((data, id) => {
-            if (!data || id === playerId) return;
-
-            // Nouveau joueur
-            if (!otherPlayers[id]) {
-                otherPlayers[id] = createPlayerMesh(0x00ff88);
-                scene.add(otherPlayers[id]);
-                playerCount++;
-                document.getElementById('playerCount').textContent = 
-                    'Joueurs connectés: ' + (playerCount + 1);
-            }
-
-            // Mise à jour position
-            if (otherPlayers[id] && data.x !== undefined) {
-                otherPlayers[id].position.set(data.x, data.y, data.z);
-                otherPlayers[id].rotation.y = data.rotation || 0;
-            }
-        });
-
-        // Nettoyer les joueurs déconnectés (timeout 5s)
-        setInterval(() => {
-            const now = Date.now();
-            Object.keys(otherPlayers).forEach(id => {
-                playersData.get(id).once((data) => {
-                    if (!data || !data.lastUpdate || now - data.lastUpdate > 5000) {
-                        if (otherPlayers[id]) {
-                            scene.remove(otherPlayers[id]);
-                            delete otherPlayers[id];
-                            playerCount--;
-                            document.getElementById('playerCount').textContent = 
-                                'Joueurs connectés: ' + (playerCount + 1);
-                        }
-                    }
-                });
-            });
-        }, 2000);
-
-        // Publier ma position toutes les 100ms
-        setInterval(() => {
-            playersData.get(playerId).put({
-                x: camera.position.x,
-                y: camera.position.y,
-                z: camera.position.z,
-                rotation: yaw,
-                lastUpdate: Date.now()
-            });
-        }, 100);
-
-        // ===== BOUCLE DE JEU =====
-        function animate() {
-            requestAnimationFrame(animate);
-
-            // Déplacement ZQSD
-            const forward = new THREE.Vector3(
-                Math.sin(yaw),
-                0,
-                Math.cos(yaw)
-            );
-            const right = new THREE.Vector3(
-                Math.sin(yaw + Math.PI/2),
-                0,
-                Math.cos(yaw + Math.PI/2)
-            );
-
-            if (keys['z'] || keys['w']) {
-                camera.position.add(forward.multiplyScalar(moveSpeed));
-            }
-            if (keys['s']) {
-                camera.position.add(forward.multiplyScalar(-moveSpeed));
-            }
-            if (keys['q'] || keys['a']) {
-                camera.position.add(right.multiplyScalar(-moveSpeed));
-            }
-            if (keys['d']) {
-                camera.position.add(right.multiplyScalar(moveSpeed));
-            }
-
-            // Appliquer rotation caméra
-            camera.rotation.set(pitch, yaw, 0, 'YXZ');
-indow.innerWidth, window.innerHeight);
-        });
-
-        // Démarrage de l'animation
-        animate();
-    </script>
+    <!-- App module -->
+    <script type="module" src="/src/app.js"></script>
 </body>
 </html>
