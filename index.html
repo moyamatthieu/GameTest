@@ -3,63 +3,468 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mon Jeu 3D - Three.js</title>
+    <title>SSV CORE - v0.9.7 (Mesh Authority)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            font-family: Arial, sans-serif;
+        body { margin: 0; overflow: hidden; background: #020617; font-family: ui-sans-serif, system-ui; color: white; }
+        canvas { display: block; }
+        #ui-root { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        .interactive { pointer-events: auto; }
+        #crosshair { 
+            position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; 
+            background: rgba(255,255,255,0.8); border-radius: 50%; transform: translate(-50%, -50%); 
         }
-        canvas {
-            display: block;
-        }
-        #info {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            color: white;
-            background: rgba(0, 0, 0, 0.5);
-            padding: 10px;
-            border-radius: 5px;
-            z-index: 100;
-        }
-        #nameInput {
-            background: rgba(255, 255, 255, 0.2);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            color: white;
-            padding: 2px 5px;
-            border-radius: 3px;
-            font-size: 12px;
-            width: 100px;
-        }
-        #nameInput:focus {
-            outline: none;
-            border-color: rgba(255, 255, 255, 0.6);
+        .glass { background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.1); }
+        #lock-prompt {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            display: none; text-align: center;
         }
     </style>
 </head>
 <body>
-    <div id="info">
-        🎮 ZQSD pour bouger | Souris pour regarder<br>
-        <span id="playerCount">Joueurs connectés: 1</span><br>
-        <span id="playerName">Pseudo: <input type="text" id="nameInput" placeholder="Anonyme" maxlength="15" /></span><br>
-        <span id="roomInfo">Salle: ...</span>
+
+<div id="ui-root">
+    <!-- Login Screen -->
+    <div id="login-screen" class="interactive absolute inset-0 bg-slate-950 flex items-center justify-center z-50">
+        <div class="glass p-8 rounded-2xl w-96 shadow-2xl">
+            <h1 class="text-3xl font-black text-blue-500 mb-2 text-center italic tracking-tighter">SSV.NETWORK</h1>
+            <p class="text-slate-500 text-[10px] mb-8 text-center uppercase tracking-[0.2em]">Maillage Spatial Distribué</p>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="text-[10px] text-slate-400 uppercase font-bold ml-1">Identifiant Nœud</label>
+                    <input id="username" type="text" placeholder="ex: node_alpha" 
+                        class="w-full p-3 bg-slate-800/50 text-white rounded-lg border border-slate-700 focus:border-blue-500 outline-none transition-all">
+                </div>
+                <div id="admin-fields" class="hidden">
+                    <label class="text-[10px] text-red-400 uppercase font-bold ml-1">Clé Gésine (Root)</label>
+                    <input id="password" type="password" placeholder="••••••••" 
+                        class="w-full p-3 bg-red-900/10 text-white rounded-lg border border-red-900/30 focus:border-red-500 outline-none">
+                </div>
+                <button id="btn-join" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-lg shadow-lg shadow-blue-900/20 transition-all uppercase text-sm tracking-widest">
+                    Initialiser la Connexion
+                </button>
+                <p class="text-[9px] text-slate-500 text-center cursor-pointer hover:text-white" onclick="document.getElementById('admin-fields').classList.toggle('hidden')">
+                    Accès Super Architecte ?
+                </p>
+            </div>
+        </div>
     </div>
 
-    <!-- Three.js via CDN (module import) -->
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
-                "yjs": "https://cdn.jsdelivr.net/npm/yjs@13.6.11/+esm",
-                "y-webrtc": "https://cdn.jsdelivr.net/npm/y-webrtc@10.3.0/+esm",
-                "y-indexeddb": "https://cdn.jsdelivr.net/npm/y-indexeddb@9.0.12/+esm",
-                "lib0/": "https://cdn.jsdelivr.net/npm/lib0@0.2.94/"
-            }
-        }
-    </script>
+    <!-- HUD / Dashboard -->
+    <div id="hud" class="hidden absolute top-6 left-6 pointer-events-none">
+        <div class="glass p-4 rounded-xl min-w-[220px] space-y-3">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <div id="status-dot" class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                    <span id="user-display" class="font-bold text-xs uppercase tracking-tight">Nœud inconnu</span>
+                </div>
+                <span id="role-tag" class="text-[9px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 uppercase font-bold">Observer</span>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-2 pt-2 border-t border-white/5">
+                <div class="flex flex-col">
+                    <span class="text-[9px] text-slate-500 uppercase">Pairs Actifs</span>
+                    <span id="stats-peers" class="text-blue-400 font-mono font-bold">0</span>
+                </div>
+                <div class="flex flex-col">
+                    <span class="text-[9px] text-slate-500 uppercase">État Monde</span>
+                    <span id="stats-entities" class="text-green-400 font-mono font-bold">0</span>
+                </div>
+            </div>
+        </div>
+    </div>
 
-    <!-- App module -->
-    <script type="module" src="/src/app.js"></script>
+    <!-- Control Room (Super Architecte Only) -->
+    <div id="control-room" class="hidden interactive absolute top-6 right-6 w-64">
+        <div class="glass p-4 rounded-xl space-y-4 border-red-500/20">
+            <h2 class="text-red-500 text-[10px] font-black uppercase tracking-widest border-b border-red-500/10 pb-2">Control Room</h2>
+            
+            <div class="space-y-2">
+                <label class="text-[10px] text-slate-400">Gravité Universelle</label>
+                <input type="range" id="slider-gravity" min="0" max="20" value="9" class="w-full accent-red-500">
+            </div>
+
+            <button id="btn-force-sync" class="w-full bg-red-950/50 hover:bg-red-900 border border-red-800 text-red-400 text-[10px] font-bold py-2 rounded uppercase">
+                Forcer Synchronisation
+            </button>
+            
+            <div id="mesh-log" class="h-32 overflow-y-auto text-[9px] font-mono text-slate-500 bg-black/30 p-2 rounded border border-white/5">
+                > Initialisation kernel...
+            </div>
+        </div>
+    </div>
+
+    <div id="lock-prompt" class="glass p-6 rounded-2xl border-blue-500/30">
+        <p class="text-blue-400 font-bold uppercase tracking-widest text-sm mb-2">Lien Perdu</p>
+        <p class="text-slate-400 text-xs">Cliquez pour reprendre le contrôle de la caméra</p>
+    </div>
+    
+    <div id="crosshair"></div>
+</div>
+
+<script>
+/**
+ * SSV CORE v0.9.7 - ENGINE
+ * Implémentation du Manifeste : Quorum, Recettes JSON et Autorité.
+ */
+
+const CONFIG = {
+    APP_PREFIX: "SSV-MESH-X97-",
+    DISCOVERY_NODES: ['admin', 'node0', 'node1', 'node2', 'node3', 'node4', 'node5'],
+    GRID_SIZE: 1000,
+    CHUNK_SIZE: 16,
+    BROADCAST_MS: 45
+};
+
+const State = {
+    peer: null,
+    username: "",
+    isArchitect: false,
+    connections: new Map(),
+    avatars: new Map(),
+    worldRegistry: new Map(), // Registre des "Recettes" (ID -> Data)
+    gravity: 9.81,
+    velocityY: 0,
+    isGrounded: true,
+    isInitialized: false,
+    isTabActive: true
+};
+
+const Engine = {
+    scene: null, camera: null, renderer: null, worldGroup: null, player: null,
+    cameraData: {
+        yaw: 0, pitch: -0.3, distance: 8, targetDistance: 8, heightOffset: 1.5,
+        minPitch: -1.4, maxPitch: 0.2
+    },
+
+    init() {
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(0x020617);
+        this.scene.fog = new THREE.FogExp2(0x020617, 0.015);
+        
+        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+        this.renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.shadowMap.enabled = true;
+        document.body.appendChild(this.renderer.domElement);
+
+        // Lights
+        this.scene.add(new THREE.AmbientLight(0x404040, 0.6));
+        const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+        sun.position.set(50, 100, 50);
+        sun.castShadow = true;
+        this.scene.add(sun);
+
+        // Ground Grid
+        const grid = new THREE.GridHelper(CONFIG.GRID_SIZE, 100, 0x1e293b, 0x0f172a);
+        this.scene.add(grid);
+
+        this.worldGroup = new THREE.Group();
+        this.scene.add(this.worldGroup);
+
+        window.addEventListener('resize', () => {
+            this.camera.aspect = window.innerWidth / window.innerHeight;
+            this.camera.updateProjectionMatrix();
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        this.animate();
+    },
+
+    createAvatar(color, name = "Pair") {
+        const group = new THREE.Group();
+        // Body
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.2, 0.4), new THREE.MeshStandardMaterial({ color, roughness: 0.3 }));
+        body.position.y = 0.6;
+        body.castShadow = true;
+        group.add(body);
+        
+        // Head
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+        head.position.y = 1.45;
+        group.add(head);
+
+        // Nametag (Canvas-based simple sprite)
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 256; canvas.height = 64;
+        ctx.fillStyle = 'white'; ctx.font = 'bold 32px Inter, sans-serif';
+        ctx.textAlign = 'center'; ctx.fillText(name, 128, 48);
+        const tex = new THREE.CanvasTexture(canvas);
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex }));
+        sprite.position.y = 2.2;
+        sprite.scale.set(1.5, 0.375, 1);
+        group.add(sprite);
+
+        return group;
+    },
+
+    animate() {
+        requestAnimationFrame(() => this.animate());
+        if (!State.isInitialized || !State.isTabActive) return;
+        
+        Network.processPhysics();
+        
+        if (this.player) {
+            this.cameraData.distance += (this.cameraData.targetDistance - this.cameraData.distance) * 0.1;
+            const offsetX = this.cameraData.distance * Math.sin(this.cameraData.yaw) * Math.cos(this.cameraData.pitch);
+            const offsetZ = this.cameraData.distance * Math.cos(this.cameraData.yaw) * Math.cos(this.cameraData.pitch);
+            const offsetY = -this.cameraData.distance * Math.sin(this.cameraData.pitch);
+            
+            this.camera.position.lerp(new THREE.Vector3(
+                this.player.position.x + offsetX,
+                this.player.position.y + this.cameraData.heightOffset + offsetY,
+                this.player.position.z + offsetZ
+            ), 0.15);
+            this.camera.lookAt(this.player.position.clone().add(new THREE.Vector3(0, 1.2, 0)));
+        }
+        this.renderer.render(this.scene, this.camera);
+    }
+};
+
+const Network = {
+    keys: {},
+    init(username) {
+        State.username = username.toLowerCase();
+        State.isInitialized = true;
+        
+        document.getElementById('user-display').innerText = State.username;
+        if (State.isArchitect) {
+            document.getElementById('role-tag').innerText = "Root";
+            document.getElementById('role-tag').classList.replace('bg-slate-800', 'bg-red-600');
+            document.getElementById('role-tag').classList.replace('text-slate-400', 'text-white');
+            document.getElementById('control-room').classList.remove('hidden');
+        }
+
+        Engine.player = Engine.createAvatar(this.getHashColor(State.username), State.username);
+        Engine.scene.add(Engine.player);
+
+        State.peer = new Peer(CONFIG.APP_PREFIX + State.username);
+        State.peer.on('open', (id) => {
+            document.getElementById('hud').classList.remove('hidden');
+            document.getElementById('status-dot').classList.replace('bg-red-500', 'bg-green-500');
+            this.log(`Node OK : ${id}`);
+            this.gossip();
+            setInterval(() => this.gossip(), 5000);
+        });
+
+        State.peer.on('connection', (conn) => this.bindEvents(conn));
+
+        // Input Bindings
+        window.addEventListener('keydown', (e) => this.keys[e.code] = true);
+        window.addEventListener('keyup', (e) => this.keys[e.code] = false);
+        window.addEventListener('blur', () => { State.isTabActive = false; this.keys = {}; });
+        window.addEventListener('focus', () => { State.isTabActive = true; this.updateLockUI(); });
+        
+        document.addEventListener('pointerlockchange', () => this.updateLockUI());
+
+        window.addEventListener('mousedown', (e) => {
+            if (document.pointerLockElement !== Engine.renderer.domElement) {
+                Engine.renderer.domElement.requestPointerLock();
+                return; 
+            }
+            this.requestAction('build');
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (document.pointerLockElement === Engine.renderer.domElement) {
+                Engine.cameraData.yaw += e.movementX * 0.003;
+                Engine.cameraData.pitch = Math.max(
+                    Engine.cameraData.minPitch, 
+                    Math.min(Engine.cameraData.maxPitch, Engine.cameraData.pitch + e.movementY * 0.003)
+                );
+            }
+        });
+
+        // Admin controls
+        document.getElementById('slider-gravity').oninput = (e) => {
+            const val = parseFloat(e.target.value) / 10;
+            this.broadcast({ type: 'law', key: 'gravity', value: val });
+        };
+    },
+
+    updateLockUI() {
+        const prompt = document.getElementById('lock-prompt');
+        prompt.style.display = (document.pointerLockElement === Engine.renderer.domElement) ? 'none' : 'block';
+    },
+
+    log(msg) {
+        const log = document.getElementById('mesh-log');
+        log.innerHTML += `<div>> ${msg}</div>`;
+        log.scrollTop = log.scrollHeight;
+    },
+
+    // LE QUORUM : On ne construit pas tout de suite, on demande au maillage
+    requestAction(type) {
+        if (type === 'build') {
+            const dir = new THREE.Vector3();
+            Engine.camera.getWorldDirection(dir);
+            const pos = new THREE.Vector3().copy(Engine.player.position).add(dir.multiplyScalar(4));
+            
+            const recipe = {
+                id: `ent_${Math.random().toString(36).substr(2, 9)}`,
+                t: 'block',
+                p: { x: Math.round(pos.x), y: Math.round(pos.y), z: Math.round(pos.z) },
+                c: State.isArchitect ? 0xef4444 : this.getHashColor(State.username),
+                creator: State.username,
+                ts: Date.now()
+            };
+
+            this.log(`Intention: ${recipe.id}`);
+            // Envoi de l'intention aux pairs pour validation (Quorum de voisinage)
+            this.broadcast({ type: 'intent_build', recipe });
+            // Optimistic rendering (on le place pour nous, mais il peut disparaître si rejeté)
+            this.commitToWorld(recipe);
+        }
+    },
+
+    commitToWorld(recipe) {
+        if (State.worldRegistry.has(recipe.id)) return;
+        
+        const geo = new THREE.BoxGeometry(1, 1, 1);
+        const mat = new THREE.MeshStandardMaterial({ color: recipe.c });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(recipe.p.x, recipe.p.y, recipe.p.z);
+        mesh.castShadow = mesh.receiveShadow = true;
+        
+        Engine.worldGroup.add(mesh);
+        State.worldRegistry.set(recipe.id, { mesh, recipe });
+        document.getElementById('stats-entities').innerText = State.worldRegistry.size;
+    },
+
+    processPhysics() {
+        if (!Engine.player) return;
+        
+        // Vitesse de base et course (Shift)
+        const baseSpeed = 0.12;
+        const sprintMultiplier = this.keys['ShiftLeft'] || this.keys['ShiftRight'] ? 1.8 : 1;
+        const speed = baseSpeed * sprintMultiplier;
+        
+        const move = new THREE.Vector3();
+        if (this.keys['KeyW'] || this.keys['KeyZ']) move.z -= 1;
+        if (this.keys['KeyS']) move.z += 1;
+        if (this.keys['KeyA'] || this.keys['KeyQ']) move.x -= 1;
+        if (this.keys['KeyD']) move.x += 1;
+
+        if (move.length() > 0) {
+            move.normalize();
+            // Appliquer la rotation de la caméra au vecteur de mouvement
+            move.applyAxisAngle(new THREE.Vector3(0, 1, 0), Engine.cameraData.yaw);
+            Engine.player.position.add(move.multiplyScalar(speed));
+            // Orienter le personnage dans la direction du mouvement
+            Engine.player.rotation.y = Math.atan2(move.x, move.z);
+        }
+        
+        // Saut (Espace)
+        if ((this.keys['Space']) && State.isGrounded) {
+            State.velocityY = 0.25;
+            State.isGrounded = false;
+        }
+        
+        // Gravité et physique verticale
+        State.velocityY -= State.gravity * 0.002;
+        Engine.player.position.y += State.velocityY;
+        
+        // Collision avec le sol
+        if (Engine.player.position.y <= 0) {
+            Engine.player.position.y = 0;
+            State.velocityY = 0;
+            State.isGrounded = true;
+        }
+
+        this.broadcast({ 
+            type: 'pos', 
+            p: { x: Engine.player.position.x, y: Engine.player.position.y, z: Engine.player.position.z }, 
+            r: Engine.player.rotation.y 
+        });
+    },
+
+    broadcast(data) {
+        State.connections.forEach(conn => { if (conn.open) conn.send(data); });
+    },
+
+    bindEvents(conn) {
+        conn.on('open', () => {
+            State.connections.set(conn.peer, conn);
+            document.getElementById('stats-peers').innerText = State.connections.size;
+            this.log(`Peer connecté: ${conn.peer.replace(CONFIG.APP_PREFIX, "")}`);
+            
+            // Sync initial du monde
+            if (State.worldRegistry.size > 0) {
+                const worldState = Array.from(State.worldRegistry.values()).map(v => v.recipe);
+                conn.send({ type: 'sync_world', data: worldState });
+            }
+        });
+        
+        conn.on('data', (data) => {
+            switch(data.type) {
+                case 'pos': this.handleRemotePos(conn.peer, data); break;
+                case 'intent_build': this.commitToWorld(data.recipe); break;
+                case 'sync_world': data.data.forEach(r => this.commitToWorld(r)); break;
+                case 'law': 
+                    if (conn.peer.includes('admin')) {
+                        State[data.key] = data.value;
+                        this.log(`Loi modifiée: ${data.key} = ${data.value}`);
+                    }
+                    break;
+            }
+        });
+
+        conn.on('close', () => {
+            State.connections.delete(conn.peer);
+            const av = State.avatars.get(conn.peer);
+            if (av) { Engine.scene.remove(av); State.avatars.delete(conn.peer); }
+            document.getElementById('stats-peers').innerText = State.connections.size;
+        });
+    },
+
+    handleRemotePos(id, data) {
+        if (!State.avatars.has(id)) {
+            const name = id.replace(CONFIG.APP_PREFIX, "");
+            const av = Engine.createAvatar(this.getHashColor(name), name);
+            State.avatars.set(id, av);
+            Engine.scene.add(av);
+        }
+        const av = State.avatars.get(id);
+        av.position.lerp(new THREE.Vector3(data.p.x, data.p.y, data.p.z), 0.2);
+        av.rotation.y = data.r;
+    },
+
+    gossip() {
+        CONFIG.DISCOVERY_NODES.forEach(n => {
+            const id = CONFIG.APP_PREFIX + n;
+            if (n !== State.username && !State.connections.has(id)) {
+                const conn = State.peer.connect(id);
+                this.bindEvents(conn);
+            }
+        });
+    },
+
+    getHashColor(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+        const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
+        return parseInt("00000".substring(0, 6 - c.length) + c, 16);
+    }
+};
+
+// UI Listeners
+document.getElementById('btn-join').onclick = () => {
+    const u = document.getElementById('username').value.trim();
+    const p = document.getElementById('password').value;
+    if (!u) return;
+    
+    if (u === 'admin' && p === 'root') State.isArchitect = true;
+    
+    document.getElementById('login-screen').classList.add('hidden');
+    Network.init(u);
+    Engine.renderer.domElement.requestPointerLock();
+};
+
+Engine.init();
+</script>
 </body>
 </html>
