@@ -4,8 +4,8 @@
   "description": "SSV CORE - Maillage Spatial Distribué P2P avec Three.js et PeerJS",
   "private": true,
   "scripts": {
-    "start": "python3 -m http.server 8080",
-    "dev": "python3 -m http.server 8080"
+    "start": "python3 server.py",
+    "dev": "python3 server.py"
   },
   "dependencies": {}
 }

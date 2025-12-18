@@ -116,7 +116,477 @@ const CONFIG = {
     DISCOVERY_NODES: ['admin', 'node0', 'node1', 'node2', 'node3', 'node4', 'node5'],
     GRID_SIZE: 1000,
     CHUNK_SIZE: 16,
-    BROADCAST_MS: 45
+    BROADCAST_MS: 45,
+    // Utilise l'origine actuelle pour supporter les codespaces et environnements distants
+    BACKUP_SERVER: window.location.origin + '/api/backup',
+    AUTOSAVE_INTERVAL: 30000 // 30 secondes
+};
+
+const Persistence = {
+    // ===== DONNÉES PERSONNELLES DU JOUEUR =====
+    
+    // Générer la clé de stockage unique pour un joueur
+    getPlayerKey(username) {
+        return `ssv_player_${username || State.username}`;
+    },
+
+    // Sauvegarder les données personnelles du joueur
+    savePlayer() {
+        try {
+            if (!State.username) return null;
+            
+            const playerData = {
+                username: State.username,
+                color: State.myColor,
+                lastPosition: Engine.player ? {
+                    x: Engine.player.position.x,
+                    y: Engine.player.position.y,
+                    z: Engine.player.position.z
+                } : { x: 0, y: 0, z: 0 },
+                lastSeen: Date.now()
+            };
+            // Clé unique par joueur : ssv_player_node0, ssv_player_node1, etc.
+            const key = this.getPlayerKey();
+            localStorage.setItem(key, JSON.stringify(playerData));
+            console.log(`👤 Joueur sauvegardé: ${playerData.username} (${key})`);
+            return playerData;
+        } catch (e) {
+            console.error('❌ Erreur sauvegarde joueur:', e);
+            return null;
+        }
+    },
+
+    // Charger les données personnelles du joueur (par username)
+    loadPlayer(username) {
+        try {
+            const key = this.getPlayerKey(username);
+            const data = localStorage.getItem(key);
+            if (data) {
+                const parsed = JSON.parse(data);
+                console.log(`👤 Joueur chargé: ${parsed.username} (${key})`);
+                return parsed;
+            }
+        } catch (e) {
+            console.error('❌ Erreur chargement joueur:', e);
+        }
+        return null;
+    },
+
+    // ===== DONNÉES DU MONDE (LOCAL) =====
+    
+    // Sauvegarder le monde dans localStorage
+    saveWorldLocal() {
+        try {
+            const worldData = Array.from(State.worldRegistry.values()).map(v => v.recipe);
+            const data = {
+                version: "0.9.7",
+                world: worldData,
+                timestamp: Date.now(),
+                author: State.username,
+                playerColors: Array.from(State.playerColors.entries()),
+                laws: {
+                    gravity: State.gravity
+                }
+            };
+            localStorage.setItem('ssv_world', JSON.stringify(data));
+            console.log(`💾 Monde local: ${worldData.length} entités sauvegardées`);
+            return data;
+        } catch (e) {
+            console.error('❌ Erreur sauvegarde monde local:', e);
+            return null;
+        }
+    },
+
+    // Charger le monde depuis localStorage
+    loadWorldLocal() {
+        try {
+            const data = localStorage.getItem('ssv_world');
+            if (data) {
+                const parsed = JSON.parse(data);
+                console.log(`📦 Monde local: ${parsed.world.length} entités chargées`);
+                return parsed;
+            }
+        } catch (e) {
+            console.error('❌ Erreur chargement monde local:', e);
+        }
+        return null;
+    },
+
+    // ===== BACKUP SERVEUR (GLOBAL) =====
+    
+    // Construire les données de spawn de tous les joueurs connus
+    buildPlayerSpawns() {
+        const spawns = {};
+        
+        // Ma propre position
+        if (Engine.player) {
+            spawns[State.username] = {
+                x: Engine.player.position.x,
+                y: Engine.player.position.y,
+                z: Engine.player.position.z,
+                color: State.myColor,
+                lastSeen: Date.now()
+            };
+        }
+        
+        // Positions des autres joueurs (avatars visibles)
+        State.avatars.forEach((avatar, peerId) => {
+            const name = peerId.replace(CONFIG.APP_PREFIX, "");
+            spawns[name] = {
+                x: avatar.position.x,
+                y: avatar.position.y,
+                z: avatar.position.z,
+                color: State.playerColors.get(peerId) || 0xffffff,
+                lastSeen: Date.now()
+            };
+        });
+        
+        return spawns;
+    },
+
+    // Sauvegarder sur le serveur (backup global)
+    async saveServer(worldData) {
+        try {
+            const backupData = {
+                version: "0.9.7",
+                savedAt: new Date().toISOString(),
+                author: State.username,
+                
+                // État du monde
+                world: worldData.world || [],
+                
+                // Positions de spawn des joueurs (pas live, mais dernière position connue)
+                playerSpawns: this.buildPlayerSpawns(),
+                
+                // Couleurs des joueurs
+                playerColors: Array.from(State.playerColors.entries()),
+                
+                // Lois du monde
+                laws: {
+                    gravity: State.gravity
+                }
+            };
+
+            const response = await fetch(CONFIG.BACKUP_SERVER, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(backupData)
+            });
+            
+            if (response.ok) {
+                const playerCount = Object.keys(backupData.playerSpawns).length;
+                console.log(`☁️  Backup serveur: ${backupData.world.length} entités, ${playerCount} joueurs`);
+            }
+        } catch (e) {
+            console.warn('⚠️  Backup serveur échoué (normal si offline):', e.message);
+        }
+    },
+
+    // Charger depuis le serveur (fallback)
+    async loadServer() {
+        try {
+            const response = await fetch(CONFIG.BACKUP_SERVER);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.world && data.world.length > 0) {
+                    console.log(`☁️  Serveur: ${data.world.length} entités, ${Object.keys(data.playerSpawns || {}).length} spawns`);
+                    return data;
+                }
+            }
+        } catch (e) {
+            console.warn('⚠️  Serveur backup inaccessible (normal si offline):', e.message);
+        }
+        return null;
+    },
+
+    // ===== STRATÉGIES DE CHARGEMENT =====
+    
+    // Réconciliation des données (timestamp le plus récent gagne)
+    reconcile(localData, serverData) {
+        if (!localData && !serverData) return null;
+        if (!localData) return serverData;
+        if (!serverData) return localData;
+        
+        // Le plus récent gagne pour la base
+        const baseData = (localData.timestamp || 0) > (serverData.timestamp || 0) ? localData : serverData;
+        
+        // Fusionner les entités du monde (plus récent par entité)
+        const mergedWorld = new Map();
+        
+        [localData, serverData].forEach(source => {
+            if (source && source.world) {
+                source.world.forEach(entity => {
+                    const existing = mergedWorld.get(entity.id);
+                    if (!existing || (entity.ts || 0) > (existing.ts || 0)) {
+                        mergedWorld.set(entity.id, entity);
+                    }
+                });
+            }
+        });
+        
+        return {
+            ...baseData,
+            world: Array.from(mergedWorld.values()),
+            timestamp: Date.now()
+        };
+    },
+
+    // Charger le monde (stratégie intelligente)
+    async loadWorld() {
+        // 1. Charger les deux sources
+        const localData = this.loadWorldLocal();
+        let serverData = null;
+        
+        // 2. Essayer le serveur si local vide ou pour réconciliation
+        if (!localData || !localData.world || localData.world.length === 0) {
+            console.log('📥 Local vide, tentative serveur...');
+            serverData = await this.loadServer();
+        }
+        
+        // 3. Réconcilier si nécessaire
+        const data = this.reconcile(localData, serverData);
+        
+        // 4. Appliquer les données
+        if (data && data.world) {
+            data.world.forEach(recipe => Network.commitToWorld(recipe));
+            
+            // Restaurer les couleurs
+            if (data.playerColors) {
+                data.playerColors.forEach(([key, value]) => {
+                    State.playerColors.set(key, value);
+                });
+            }
+            
+            // Restaurer les lois
+            if (data.laws) {
+                State.gravity = data.laws.gravity || 9.81;
+            }
+            
+            console.log(`✅ Monde chargé: ${data.world.length} entités`);
+            return data;
+        }
+        
+        console.log('🆕 Nouveau monde (aucune sauvegarde trouvée)');
+        return null;
+    },
+
+    // ===== ACTIONS DE SAUVEGARDE =====
+    
+    // Sauvegarde rapide (locale uniquement)
+    saveQuick() {
+        this.savePlayer();
+        return this.saveWorldLocal();
+    },
+
+    // Sauvegarde complète (local + serveur si autorisé)
+    async saveFull() {
+        this.savePlayer();
+        const worldData = this.saveWorldLocal();
+        
+        // Backup serveur si admin OU si dernier joueur
+        const shouldBackupServer = State.isArchitect || this.isLastPlayer();
+        
+        if (worldData && shouldBackupServer) {
+            await this.saveServer(worldData);
+        }
+        
+        return worldData;
+    },
+
+    // Vérifier si on est le dernier joueur (pour backup d'urgence)
+    isLastPlayer() {
+        return State.connections.size === 0 && State.isInitialized;
+    },
+
+    // ===== LEGACY COMPATIBILITY =====
+    
+    // Anciennes méthodes pour compatibilité
+    saveLocal() { return this.saveQuick(); },
+    loadLocal() { return this.loadWorldLocal(); },
+    async load() { return this.loadWorld(); },
+    async save() { return this.saveFull(); }
+};
+
+/**
+ * SaveTrigger - Système de sauvegarde intelligent
+ * Gère quand et comment sauvegarder basé sur plusieurs critères
+ */
+const SaveTrigger = {
+    // Configuration des seuils
+    config: {
+        // Distance
+        distanceThreshold: 5,          // Sauvegarder tous les 5 mètres parcourus
+        
+        // Temps
+        timeIntervalIdle: 60000,       // 60s si inactif
+        timeIntervalActive: 30000,     // 30s si actif
+        
+        // Actions (priorités)
+        actionPriority: {
+            build: 'immediate',         // Construction = sauvegarde immédiate
+            destroy: 'immediate',       // Destruction = sauvegarde immédiate
+            inventory: 'deferred',      // Inventaire = sauvegarde différée (batch)
+            move: 'threshold',          // Mouvement = sauvegarde par seuil de distance
+            idle: 'interval'            // Inactif = sauvegarde par intervalle
+        },
+        
+        // Anti-spam
+        minSaveInterval: 2000,          // Minimum 2s entre sauvegardes
+        batchDelay: 5000                // Délai pour actions "deferred" (5s)
+    },
+    
+    // État du tracker
+    state: {
+        lastSaveTime: 0,
+        lastPosition: { x: 0, y: 0, z: 0 },
+        distanceSinceLastSave: 0,
+        pendingActions: [],
+        batchTimeout: null,
+        isActive: false,
+        actionCount: 0
+    },
+    
+    // Initialiser le système
+    init() {
+        console.log('⏱️ SaveTrigger initialisé');
+        this.state.lastSaveTime = Date.now();
+        
+        // Timer adaptatif (vérifie toutes les 5 secondes)
+        setInterval(() => this.checkTimeTrigger(), 5000);
+    },
+    
+    // Mettre à jour la position et vérifier le seuil de distance
+    updatePosition(newPos) {
+        if (!this.state.lastPosition) {
+            this.state.lastPosition = { ...newPos };
+            return;
+        }
+        
+        // Calculer la distance parcourue
+        const dx = newPos.x - this.state.lastPosition.x;
+        const dy = newPos.y - this.state.lastPosition.y;
+        const dz = newPos.z - this.state.lastPosition.z;
+        const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
+        
+        this.state.distanceSinceLastSave += distance;
+        this.state.lastPosition = { ...newPos };
+        this.state.isActive = distance > 0.01;
+        
+        // Seuil de distance atteint ?
+        if (this.state.distanceSinceLastSave >= this.config.distanceThreshold) {
+            this.triggerSave('distance', `${this.state.distanceSinceLastSave.toFixed(1)}m parcourus`);
+            this.state.distanceSinceLastSave = 0;
+        }
+    },
+    
+    // Enregistrer une action
+    recordAction(actionType, data = {}) {
+        const priority = this.config.actionPriority[actionType] || 'deferred';
+        this.state.actionCount++;
+        
+        switch (priority) {
+            case 'immediate':
+                // Sauvegarde immédiate (construction, destruction)
+                this.triggerSave('action', `Action: ${actionType}`);
+                break;
+                
+            case 'deferred':
+                // Accumuler et sauvegarder en batch
+                this.state.pendingActions.push({ type: actionType, data, time: Date.now() });
+                this.scheduleBatchSave();
+                break;
+                
+            case 'threshold':
+                // Géré par updatePosition()
+                break;
+                
+            case 'interval':
+                // Géré par checkTimeTrigger()
+                break;
+        }
+    },
+    
+    // Programmer une sauvegarde batch (pour actions différées)
+    scheduleBatchSave() {
+        if (this.state.batchTimeout) return; // Déjà programmé
+        
+        this.state.batchTimeout = setTimeout(() => {
+            const count = this.state.pendingActions.length;
+            if (count > 0) {
+                this.triggerSave('batch', `${count} actions en attente`);
+                this.state.pendingActions = [];
+            }
+            this.state.batchTimeout = null;
+        }, this.config.batchDelay);
+    },
+    
+    // Vérifier le trigger temporel
+    checkTimeTrigger() {
+        const now = Date.now();
+        const elapsed = now - this.state.lastSaveTime;
+        const interval = this.state.isActive 
+            ? this.config.timeIntervalActive 
+            : this.config.timeIntervalIdle;
+        
+        if (elapsed >= interval) {
+            const mode = this.state.isActive ? 'actif' : 'inactif';
+            this.triggerSave('time', `Intervalle ${mode} (${Math.round(elapsed/1000)}s)`);
+        }
+    },
+    
+    // Déclencher une sauvegarde
+    triggerSave(reason, details = '') {
+        const now = Date.now();
+        
+        // Anti-spam : respecter l'intervalle minimum
+        if (now - this.state.lastSaveTime < this.config.minSaveInterval) {
+            console.log(`⏳ Sauvegarde ignorée (anti-spam): ${reason}`);
+            return false;
+        }
+        
+        this.state.lastSaveTime = now;
+        
+        // Log détaillé
+        console.log(`💾 Sauvegarde [${reason}]: ${details}`);
+        
+        // Exécuter la sauvegarde appropriée
+        switch (reason) {
+            case 'action':
+                // Actions critiques = sauvegarde complète
+                Persistence.saveFull();
+                break;
+                
+            case 'distance':
+            case 'time':
+            case 'batch':
+                // Autres = sauvegarde rapide
+                Persistence.saveQuick();
+                break;
+                
+            default:
+                Persistence.saveQuick();
+        }
+        
+        return true;
+    },
+    
+    // Forcer une sauvegarde immédiate (fermeture, urgence)
+    forceImmediate(reason = 'forced') {
+        console.log(`🚨 Sauvegarde forcée: ${reason}`);
+        this.state.lastSaveTime = 0; // Bypass anti-spam
+        Persistence.saveQuick();
+    },
+    
+    // Obtenir les statistiques
+    getStats() {
+        return {
+            lastSave: new Date(this.state.lastSaveTime).toLocaleTimeString(),
+            distanceSinceLastSave: this.state.distanceSinceLastSave.toFixed(1) + 'm',
+            pendingActions: this.state.pendingActions.length,
+            totalActions: this.state.actionCount,
+            isActive: this.state.isActive
+        };
+    }
 };
 
 const State = {
@@ -230,7 +700,7 @@ const Engine = {
 
 const Network = {
     keys: {},
-    init(username) {
+    async init(username) {
         State.username = username.toLowerCase();
         State.isInitialized = true;
         
@@ -249,6 +719,28 @@ const Network = {
         Engine.player = Engine.createAvatar(State.myColor, State.username);
         Engine.scene.add(Engine.player);
 
+        // Charger les données du joueur (position de spawn) - avec le username actuel
+        const playerData = Persistence.loadPlayer(State.username);
+        if (playerData && playerData.lastPosition) {
+            Engine.player.position.set(
+                playerData.lastPosition.x,
+                playerData.lastPosition.y,
+                playerData.lastPosition.z
+            );
+            console.log(`📍 Position restaurée pour ${State.username}: (${playerData.lastPosition.x.toFixed(1)}, ${playerData.lastPosition.y.toFixed(1)}, ${playerData.lastPosition.z.toFixed(1)})`);
+        } else {
+            console.log(`🆕 Nouveau joueur ${State.username}, position par défaut`);
+        }
+
+        // Charger le monde sauvegardé
+        const worldData = await Persistence.loadWorld();
+        
+        // Si on a des spawns du serveur, proposer de s'y téléporter
+        if (worldData && worldData.playerSpawns && worldData.playerSpawns[State.username]) {
+            const spawn = worldData.playerSpawns[State.username];
+            console.log(`🎯 Spawn serveur disponible pour ${State.username}`);
+        }
+
         State.peer = new Peer(CONFIG.APP_PREFIX + State.username);
         State.peer.on('open', (id) => {
             document.getElementById('hud').classList.remove('hidden');
@@ -256,6 +748,9 @@ const Network = {
             this.log(`Node OK : ${id}`);
             this.gossip();
             setInterval(() => this.gossip(), 5000);
+            
+            // Initialiser le système de sauvegarde intelligent
+            SaveTrigger.init();
         });
 
         State.peer.on('connection', (conn) => this.bindEvents(conn));
@@ -278,7 +773,13 @@ const Network = {
             State.isTabActive = !document.hidden;
             if (document.hidden) {
                 this.keys = {}; // Réinitialiser les touches si on quitte l'onglet
+                SaveTrigger.forceImmediate('tab_hidden'); // Sauvegarde forcée
             }
+        });
+        
+        // Sauvegarde avant fermeture de la page
+        window.addEventListener('beforeunload', () => {
+            SaveTrigger.forceImmediate('page_unload'); // Sauvegarde forcée
         });
         
         // Gérer le changement de pointer lock (Échap libère la souris)
@@ -352,6 +853,9 @@ const Network = {
             this.broadcast({ type: 'intent_build', recipe });
             // Optimistic rendering (on le place pour nous, mais il peut disparaître si rejeté)
             this.commitToWorld(recipe);
+            
+            // 🔔 Déclencher sauvegarde (action critique)
+            SaveTrigger.recordAction('build', { recipeId: recipe.id });
         }
     },
 
@@ -409,6 +913,13 @@ const Network = {
             State.isGrounded = true;
         }
 
+        // 🔔 Tracker la position pour le système de sauvegarde
+        SaveTrigger.updatePosition({
+            x: Engine.player.position.x,
+            y: Engine.player.position.y,
+            z: Engine.player.position.z
+        });
+
         this.broadcast({ 
             type: 'pos', 
             p: { x: Engine.player.position.x, y: Engine.player.position.y, z: Engine.player.position.z }, 
@@ -450,6 +961,16 @@ const Network = {
                 const worldState = Array.from(State.worldRegistry.values()).map(v => v.recipe);
                 conn.send({ type: 'sync_world', data: worldState });
             }
+            
+            // Partager ma liste de pairs connus (découverte transitive)
+            if (State.connections.size > 1) {
+                const knownPeers = Array.from(State.connections.keys());
+                conn.send({ 
+                    type: 'peer_discovery', 
+                    peers: knownPeers,
+                    origin: CONFIG.APP_PREFIX + State.username
+                });
+            }
         });
         
         conn.on('data', (data) => {
@@ -474,6 +995,12 @@ const Network = {
                         this.log(`⚠️ Collision d'identifiant avec ${conn.peer}`);
                         alert(`Un autre joueur utilise l'identifiant "${State.username}".\nVous allez être déconnecté.`);
                         setTimeout(() => location.reload(), 1000);
+                    }
+                    break;
+                case 'peer_discovery':
+                    // Un pair me partage sa liste de pairs connus
+                    if (data.peers && Array.isArray(data.peers)) {
+                        data.peers.forEach(peerId => this.discoverPeer(peerId));
                     }
                     break;
                 case 'law': 
@@ -508,13 +1035,50 @@ const Network = {
     },
 
     gossip() {
+        // Système de découverte amélioré :
+        // 1. Essayer de se connecter aux nœuds prédéfinis
+        // 2. Propager la liste des pairs connus
+        
         CONFIG.DISCOVERY_NODES.forEach(n => {
             const id = CONFIG.APP_PREFIX + n;
             if (n !== State.username && !State.connections.has(id)) {
-                const conn = State.peer.connect(id);
-                this.bindEvents(conn);
+                try {
+                    const conn = State.peer.connect(id, { reliable: true });
+                    if (conn) {
+                        this.bindEvents(conn);
+                    }
+                } catch (e) {
+                    // Nœud non disponible, silencieux
+                }
             }
         });
+        
+        // Propager la liste des pairs connus aux pairs connectés
+        // Cela permet la découverte transitive : A connaît B, B connaît C, donc A découvre C
+        if (State.connections.size > 0) {
+            const knownPeers = Array.from(State.connections.keys());
+            this.broadcast({ 
+                type: 'peer_discovery', 
+                peers: knownPeers,
+                origin: CONFIG.APP_PREFIX + State.username
+            });
+        }
+    },
+    
+    // Découvrir de nouveaux pairs via un pair existant
+    discoverPeer(peerId) {
+        if (peerId === CONFIG.APP_PREFIX + State.username) return; // C'est moi
+        if (State.connections.has(peerId)) return; // Déjà connecté
+        
+        try {
+            const conn = State.peer.connect(peerId, { reliable: true });
+            if (conn) {
+                this.log(`🔍 Découverte: ${peerId.replace(CONFIG.APP_PREFIX, "")}`);
+                this.bindEvents(conn);
+            }
+        } catch (e) {
+            // Échec silencieux
+        }
     },
 
     getHashColor(str) {
