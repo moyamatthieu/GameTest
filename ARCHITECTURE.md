@@ -1,12 +1,12 @@
-# Architecture P2P Décentralisée — Plan de Développement
+# Architecture SSV CORE — Maillage Spatial Distribué
 
 ## 🎯 Objectif
 
 Créer un jeu 3D multijoueur **vraiment décentralisé** où :
-- Chaque joueur est un hôte (pas de serveur autoritaire)
-- Les modifications du monde persistent même après déconnexion
-- La synchronisation est rapide et sans lag
-- Le système reste simple et élégant
+- Chaque joueur est un nœud du mesh P2P (pas de serveur autoritaire)
+- Architecture mesh pure avec PeerJS et système de recettes JSON
+- Synchronisation temps réel via broadcast direct
+- Le système reste simple et élégant (1 fichier HTML standalone)
 
 ---
 
@@ -14,24 +14,25 @@ Créer un jeu 3D multijoueur **vraiment décentralisé** où :
 
 ### Principes fondamentaux
 
-1. **Chaque joueur = Un nœud complet**
-   - Stocke une copie du monde localement (IndexedDB)
-   - Peut fonctionner hors-ligne
-   - Se resynchronise automatiquement à la reconnexion
+1. **Chaque joueur = Un nœud du mesh P2P**
+   - Connexion WebRTC directe avec tous les autres joueurs
+   - État du monde en mémoire (Map JavaScript)
+   - Persistance IndexedDB prévue en Phase 2
 
-2. **CRDT (Conflict-free Replicated Data Types)**
-   - Résolution automatique des conflits
-   - Pas besoin de serveur pour arbitrer
-   - Fusion déterministe des états
+2. **Recettes JSON comme primitif de synchronisation**
+   - Chaque modification = une "recette" JSON structurée
+   - Broadcast direct à tous les pairs connectés
+   - Application optimiste locale puis consensus implicite
 
-3. **Synchronisation différentielle**
-   - Transmettre uniquement les deltas (changements)
-   - Pas de transfert de l'état complet du monde
+3. **Broadcast haute fréquence**
+   - Positions joueurs : ~22 Hz (CONFIG.BROADCAST_MS = 45ms)
+   - Modifications monde : événementiel
+   - Lois physiques : propagées par les super-architectes
 
-4. **Chunking spatial**
-   - Le monde est divisé en chunks (zones)
-   - Synchronisation prioritaire des chunks proches
-   - Réduction drastique de la bande passante
+4. **Chunking spatial (Phase 2)**
+   - Le monde sera divisé en chunks 16×16×16
+   - Chargement/déchargement dynamique selon proximité
+   - Réduction de la charge mémoire et réseau
 
 ---
 
@@ -67,18 +68,17 @@ World (CRDT Map)
 ```
 ┌─────────────────────────────────────────────────────┐
 │                    LAYER 4: UI                      │
-│            Affichage Three.js + Events              │
+│         Three.js Scene + Tailwind Interface         │
 ├─────────────────────────────────────────────────────┤
-│                 LAYER 3: GAME STATE                 │
-│     Position joueurs (haute fréquence ~60Hz)        │
-│     → Broadcast UDP-like via DataChannel            │
+│                 LAYER 3: GAME ENGINE                │
+│      Physique, Caméra, Contrôles, Rendu 3D         │
 ├─────────────────────────────────────────────────────┤
-│                LAYER 2: WORLD STATE                 │
-│     Modifications monde (basse fréquence)           │
-│     → CRDT Y.js avec persistance                    │
+│                 LAYER 2: NETWORK MESH               │
+│       PeerJS - Broadcast P2P Direct (~22Hz)         │
 ├─────────────────────────────────────────────────────┤
-│               LAYER 1: PERSISTENCE                  │
-│     IndexedDB local + Sync P2P                      │
+│               LAYER 1: STATE MANAGEMENT             │
+│     Recettes JSON + worldRegistry (Mémoire)         │
+│     IndexedDB prévu en Phase 2                      │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -90,10 +90,11 @@ World (CRDT Map)
 
 | Type de données | Fréquence | Méthode | Persistance |
 |-----------------|-----------|---------|-------------|
-| Position joueur | 60 Hz | WebRTC DataChannel (non-fiable) | Non |
-| Animation/État joueur | 10 Hz | WebRTC DataChannel | Non |
-| Modification monde | Événementiel | Y.js CRDT | Oui |
-| Chat/Messages | Événementiel | Y.js CRDT | Oui |
+| Position joueur | ~22 Hz | PeerJS broadcast | Non |
+| Rotation joueur | ~22 Hz | PeerJS broadcast | Non |
+| Construction bloc | Événementiel | Recette JSON broadcast | Mémoire volatile |
+| Lois physiques | Événementiel | Admin broadcast | Appliqué localement |
+| Chat (prévu) | Événementiel | PeerJS broadcast | Phase 2 |
 
 ### 2. Chunking intelligent
 
@@ -139,31 +140,33 @@ player.position.lerp(player.targetPosition, 0.2);
 ### Connexion d'un joueur
 
 ```
-1. Charger état local (IndexedDB)
+1. Saisir identifiant nœud (login screen)
          ↓
-2. Se connecter aux pairs (WebRTC via signaling)
+2. Créer instance PeerJS (CONFIG.APP_PREFIX + username)
          ↓
-3. Échanger vecteurs de version (qui a quoi?)
+3. Gossip protocol : tenter connexion aux DISCOVERY_NODES
          ↓
-4. Recevoir les deltas manquants
+4. Recevoir sync_world des pairs déjà connectés
          ↓
-5. Fusionner avec état local (CRDT)
+5. Appliquer toutes les recettes reçues localement
          ↓
-6. Prêt à jouer!
+6. Prêt à jouer! (broadcast position démarre)
 ```
 
-### Modification du monde
+### Modification du monde (Système de Recettes)
 
 ```
-1. Joueur place/détruit un bloc
+1. Joueur clique pour placer un bloc
          ↓
-2. Modification appliquée au CRDT local
+2. Génération de la recette JSON
          ↓
-3. Delta propagé aux pairs connectés
+3. Application OPTIMISTE locale (rendu immédiat)
          ↓
-4. Persistance locale immédiate (IndexedDB)
+4. Broadcast { type: 'intent_build', recipe } à tous
          ↓
-5. Les autres joueurs reçoivent et appliquent
+5. Chaque pair reçoit et applique la recette
+         ↓
+6. Consensus implicite (pas de rejet = accepté)
 ```
 
 ### Déconnexion d'un joueur
@@ -650,28 +653,34 @@ Pour que les joueurs contribuent des ressources :
 ### Roadmap réaliste
 
 ```
-PHASE 1 : P2P pur (actuel)
-├── Pas de super-nœuds
-├── 2-10 joueurs direct
-└── Valider le gameplay
+PHASE 1 : MVP avec PeerJS ✅ (TERMINÉ)
+├── [x] Full mesh P2P avec PeerJS
+├── [x] Système de recettes JSON
+├── [x] 10-15 joueurs simultanés
+├── [x] Rendu 3D avec Three.js
+├── [x] Physique basique + caméra third-person
+├── [x] Interface utilisateur complète
+└── [x] Rôle Super Architecte (admin)
 
-PHASE 2 : Super-nœuds manuels
-├── Quelques joueurs font tourner un serveur Docker
-├── Les autres se connectent à eux
-├── 20-50 joueurs possible
-└── Pas encore d'auto-scaling
+PHASE 2 : Persistance et Robustesse 🔄 (EN COURS)
+├── [ ] Implémentation IndexedDB local
+├── [ ] Synchronisation différentielle (deltas)
+├── [ ] Chunking spatial basique (16×16×16)
+├── [ ] Validation par consensus simple
+├── [ ] Support 20 joueurs simultanés
+└── [ ] Gestion conflits par timestamp
 
-PHASE 3 : Cloud décentralisé
-├── K3s + Tailscale
-├── Auto-scaling
-├── 100+ joueurs
-└── Système d'incitation
+PHASE 3 : Scalabilité (Optionnel)
+├── [ ] Super-peers en PeerJS (pas Yjs)
+├── [ ] Topologie hybride mesh/étoile
+├── [ ] 50+ joueurs avec relais
+└── [ ] Décision: Migrer vers Yjs SI nécessaire
 
-PHASE 4 : Production
-├── Optimisations
-├── Migration seamless
-├── Monitoring distribué
-└── 1000+ joueurs possibles
+PHASE 4 : Cloud Décentralisé (Vision)
+├── [ ] K3s + Tailscale pour super-nodes
+├── [ ] Auto-scaling dynamique
+├── [ ] Système de récompenses contributeurs
+└── [ ] 100+ joueurs avec sharding spatial
 ```
 
 ---
@@ -731,15 +740,29 @@ function validateBlockPlacement(playerId, position, blockType) {
 
 ## 🛠️ Technologies utilisées
 
-| Besoin | Technologie | Raison |
-|--------|-------------|--------|
-| Rendu 3D | Three.js | Standard, performant |
-| CRDT | Y.js | Mature, bien documenté |
-| P2P | y-webrtc | Intégré à Y.js |
-| Persistance | y-indexeddb | Intégré à Y.js |
-| Signaling | Serveurs publics Y.js | Gratuit, fiable |
+| Besoin | Technologie | Version | Raison |
+|--------|-------------|---------|--------|
+| **Rendu 3D** | Three.js | r128 | Standard web, performant, bien documenté |
+| **P2P Mesh** | PeerJS | 1.5.2 | Simple, WebRTC sans complexité |
+| **Interface** | Tailwind CSS | 3.x (CDN) | Styling rapide, responsive |
+| **Hébergement** | HTML standalone | - | Déployable partout (GitHub Pages, etc.) |
+| **Persistance** | Mémoire (Map) | - | Phase 1, IndexedDB en Phase 2 |
 
-> ⚠️ **Note** : Le code actuel (`src/app.js`) utilise déjà Y.js. Le fichier `server.js` utilise Gun.js comme relais, mais celui-ci peut être supprimé car Y.js utilise ses propres serveurs de signaling publics.
+### Pourquoi PeerJS plutôt que Yjs ?
+
+**Avantages PeerJS pour ce projet** :
+- ✅ API simple et intuitive (apprentissage rapide)
+- ✅ Contrôle total sur les messages (debug facile)
+- ✅ Bundle léger (~20KB vs ~100KB pour Yjs)
+- ✅ Pas de "magie" CRDT cachée
+- ✅ Parfait pour 10-20 joueurs en full mesh
+
+**Quand envisager Yjs** :
+- ⚠️ Si >50 joueurs simultanés
+- ⚠️ Si conflits fréquents (>10% des actions)
+- ⚠️ Si besoin offline-first complexe
+
+**Décision actuelle** : PeerJS suffit largement. Migration vers Yjs uniquement si les données le justifient.
 
 ---
 

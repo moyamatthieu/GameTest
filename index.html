@@ -18,8 +18,8 @@
         }
         .glass { background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.1); }
         #lock-prompt {
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            display: none; text-align: center;
+            position: absolute; top: 6px; right: 280px;
+            display: none;
         }
     </style>
 </head>
@@ -97,9 +97,9 @@
         </div>
     </div>
 
-    <div id="lock-prompt" class="glass p-6 rounded-2xl border-blue-500/30">
-        <p class="text-blue-400 font-bold uppercase tracking-widest text-sm mb-2">Lien Perdu</p>
-        <p class="text-slate-400 text-xs">Cliquez pour reprendre le contrôle de la caméra</p>
+    <div id="lock-prompt" class="glass p-3 rounded-xl border-blue-500/30" style="display: none;">
+        <p class="text-blue-400 font-bold uppercase tracking-widest text-[10px]">Mode Observer</p>
+        <p class="text-slate-400 text-[9px]">Cliquez pour contrôler</p>
     </div>
     
     <div id="crosshair"></div>
@@ -123,6 +123,8 @@ const State = {
     peer: null,
     username: "",
     isArchitect: false,
+    myColor: null, // Ma couleur personnelle
+    playerColors: new Map(), // peerId -> couleur
     connections: new Map(),
     avatars: new Map(),
     worldRegistry: new Map(), // Registre des "Recettes" (ID -> Data)
@@ -204,6 +206,7 @@ const Engine = {
 
     animate() {
         requestAnimationFrame(() => this.animate());
+        // Le jeu continue même si pointer lock relâché, pause uniquement si changement d'onglet
         if (!State.isInitialized || !State.isTabActive) return;
         
         Network.processPhysics();
@@ -231,6 +234,10 @@ const Network = {
         State.username = username.toLowerCase();
         State.isInitialized = true;
         
+        // Générer ma couleur unique
+        State.myColor = this.getHashColor(State.username);
+        State.playerColors.set(CONFIG.APP_PREFIX + State.username, State.myColor);
+        
         document.getElementById('user-display').innerText = State.username;
         if (State.isArchitect) {
             document.getElementById('role-tag').innerText = "Root";
@@ -239,7 +246,7 @@ const Network = {
             document.getElementById('control-room').classList.remove('hidden');
         }
 
-        Engine.player = Engine.createAvatar(this.getHashColor(State.username), State.username);
+        Engine.player = Engine.createAvatar(State.myColor, State.username);
         Engine.scene.add(Engine.player);
 
         State.peer = new Peer(CONFIG.APP_PREFIX + State.username);
@@ -252,14 +259,36 @@ const Network = {
         });
 
         State.peer.on('connection', (conn) => this.bindEvents(conn));
+        
+        // Gérer l'événement de kick (identifiant dupliqué)
+        State.peer.on('error', (err) => {
+            if (err.type === 'peer-unavailable') {
+                // Peer non disponible, normal
+            } else {
+                console.error('Erreur PeerJS:', err);
+            }
+        });
 
         // Input Bindings
         window.addEventListener('keydown', (e) => this.keys[e.code] = true);
         window.addEventListener('keyup', (e) => this.keys[e.code] = false);
-        window.addEventListener('blur', () => { State.isTabActive = false; this.keys = {}; });
-        window.addEventListener('focus', () => { State.isTabActive = true; this.updateLockUI(); });
         
-        document.addEventListener('pointerlockchange', () => this.updateLockUI());
+        // Pause uniquement si on change d'onglet (pas si souris quitte la fenêtre)
+        document.addEventListener('visibilitychange', () => {
+            State.isTabActive = !document.hidden;
+            if (document.hidden) {
+                this.keys = {}; // Réinitialiser les touches si on quitte l'onglet
+            }
+        });
+        
+        // Gérer le changement de pointer lock (Échap libère la souris)
+        document.addEventListener('pointerlockchange', () => {
+            this.updateLockUI();
+            // Réinitialiser les touches quand on libère le contrôle
+            if (document.pointerLockElement !== Engine.renderer.domElement) {
+                this.keys = {};
+            }
+        });
 
         window.addEventListener('mousedown', (e) => {
             if (document.pointerLockElement !== Engine.renderer.domElement) {
@@ -288,7 +317,12 @@ const Network = {
 
     updateLockUI() {
         const prompt = document.getElementById('lock-prompt');
-        prompt.style.display = (document.pointerLockElement === Engine.renderer.domElement) ? 'none' : 'block';
+        const crosshair = document.getElementById('crosshair');
+        const isLocked = document.pointerLockElement === Engine.renderer.domElement;
+        
+        // Afficher le prompt et masquer le crosshair seulement si déverrouillé
+        prompt.style.display = isLocked ? 'none' : 'block';
+        crosshair.style.display = isLocked ? 'block' : 'none';
     },
 
     log(msg) {
@@ -378,7 +412,8 @@ const Network = {
         this.broadcast({ 
             type: 'pos', 
             p: { x: Engine.player.position.x, y: Engine.player.position.y, z: Engine.player.position.z }, 
-            r: Engine.player.rotation.y 
+            r: Engine.player.rotation.y,
+            color: State.myColor
         });
     },
 
@@ -392,6 +427,24 @@ const Network = {
             document.getElementById('stats-peers').innerText = State.connections.size;
             this.log(`Peer connecté: ${conn.peer.replace(CONFIG.APP_PREFIX, "")}`);
             
+            // Vérifier les identifiants dupliqués
+            const remoteName = conn.peer.replace(CONFIG.APP_PREFIX, "");
+            const myName = State.username;
+            
+            // Si quelqu'un a le même nom que moi, je kick l'ancien (moi)
+            if (remoteName === myName) {
+                this.log(`⚠️ Identifiant dupliqué détecté: ${remoteName}`);
+                // Le nouveau me kick (je suis l'ancien)
+                setTimeout(() => {
+                    alert(`Un autre joueur s'est connecté avec votre identifiant "${myName}".\nVous avez été déconnecté.`);
+                    location.reload();
+                }, 500);
+                return;
+            }
+            
+            // Envoyer mon identité avec ma couleur
+            conn.send({ type: 'identity', username: myName, color: State.myColor });
+            
             // Sync initial du monde
             if (State.worldRegistry.size > 0) {
                 const worldState = Array.from(State.worldRegistry.values()).map(v => v.recipe);
@@ -401,9 +454,28 @@ const Network = {
         
         conn.on('data', (data) => {
             switch(data.type) {
-                case 'pos': this.handleRemotePos(conn.peer, data); break;
+                case 'pos': 
+                    // Mettre à jour la couleur si fournie
+                    if (data.color) {
+                        State.playerColors.set(conn.peer, data.color);
+                    }
+                    this.handleRemotePos(conn.peer, data); 
+                    break;
                 case 'intent_build': this.commitToWorld(data.recipe); break;
                 case 'sync_world': data.data.forEach(r => this.commitToWorld(r)); break;
+                case 'identity':
+                    // Un pair m'informe de son identité
+                    // Stocker sa couleur
+                    if (data.color) {
+                        State.playerColors.set(conn.peer, data.color);
+                    }
+                    // Si c'est le même que le mien, je suis l'ancien, je me déconnecte
+                    if (data.username === State.username) {
+                        this.log(`⚠️ Collision d'identifiant avec ${conn.peer}`);
+                        alert(`Un autre joueur utilise l'identifiant "${State.username}".\nVous allez être déconnecté.`);
+                        setTimeout(() => location.reload(), 1000);
+                    }
+                    break;
                 case 'law': 
                     if (conn.peer.includes('admin')) {
                         State[data.key] = data.value;
@@ -424,7 +496,9 @@ const Network = {
     handleRemotePos(id, data) {
         if (!State.avatars.has(id)) {
             const name = id.replace(CONFIG.APP_PREFIX, "");
-            const av = Engine.createAvatar(this.getHashColor(name), name);
+            // Utiliser la couleur stockée ou générer une couleur par défaut
+            const color = State.playerColors.get(id) || this.getHashColor(name);
+            const av = Engine.createAvatar(color, name);
             State.avatars.set(id, av);
             Engine.scene.add(av);
         }
@@ -444,10 +518,39 @@ const Network = {
     },
 
     getHashColor(str) {
+        // Générer un hash unique pour chaque string
         let hash = 0;
-        for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
-        const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
-        return parseInt("00000".substring(0, 6 - c.length) + c, 16);
+        for (let i = 0; i < str.length; i++) {
+            hash = str.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        
+        // Palette de couleurs vives et distinctes
+        const colors = [
+            0xFF6B6B, // Rouge corail
+            0x4ECDC4, // Turquoise
+            0xFFE66D, // Jaune doré
+            0x95E1D3, // Vert menthe
+            0xF38181, // Rose saumon
+            0xAA96DA, // Violet pastel
+            0xFCBF49, // Orange vif
+            0x06FFA5, // Vert néon
+            0xFF5E78, // Rose vif
+            0x5B8DEF, // Bleu ciel
+            0xFFAA00, // Orange ambre
+            0x00D9FF, // Cyan électrique
+            0xFF6EC7, // Magenta
+            0x7FFF00, // Vert chartreuse
+            0xFF4757, // Rouge cerise
+            0x48DBB4, // Vert émeraude
+            0xF7B731, // Jaune moutarde
+            0x5F27CD, // Violet profond
+            0x00D2D3, // Cyan profond
+            0xFF9FF3  // Rose bonbon
+        ];
+        
+        // Sélectionner une couleur basée sur le hash
+        const index = Math.abs(hash) % colors.length;
+        return colors[index];
     }
 };
 
@@ -462,6 +565,8 @@ document.getElementById('btn-join').onclick = () => {
     document.getElementById('login-screen').classList.add('hidden');
     Network.init(u);
     Engine.renderer.domElement.requestPointerLock();
+    // Initialiser l'UI du crosshair
+    setTimeout(() => Network.updateLockUI(), 100);
 };
 
 Engine.init();
