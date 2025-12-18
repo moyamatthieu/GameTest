@@ -115,6 +115,11 @@
         </div>
     </div>
     
+    <!-- Inventory Hotbar -->
+    <div id="hotbar" class="hidden absolute bottom-6 left-1/2 transform -translate-x-1/2 flex gap-2">
+        <!-- Generated dynamically -->
+    </div>
+    
     <div id="crosshair"></div>
 </div>
 
@@ -132,7 +137,77 @@ const CONFIG = {
     BROADCAST_MS: 45,
     // Utilise l'origine actuelle pour supporter les codespaces et environnements distants
     BACKUP_SERVER: window.location.origin + '/api/backup',
-    AUTOSAVE_INTERVAL: 30000 // 30 secondes
+    AUTOSAVE_INTERVAL: 30000, // 30 secondes
+    TERRAIN_SIZE: 32,  // Taille du terrain généré (32x32)
+    TERRAIN_HEIGHT: 8  // Hauteur maximale du terrain
+};
+
+// Générateur de bruit simplex simplifié pour terrain procédural
+const SimplexNoise = {
+    grad3: [[1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],[1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],[0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1]],
+    p: [],
+    perm: [],
+    
+    seed(seed) {
+        // Initialiser avec une graine
+        if (seed === undefined) seed = Math.random();
+        const random = (function(s) {
+            let state = s;
+            return function() {
+                state = (state * 9301 + 49297) % 233280;
+                return state / 233280;
+            };
+        })(seed * 100000);
+        
+        for (let i = 0; i < 256; i++) this.p[i] = Math.floor(random() * 256);
+        for (let i = 0; i < 512; i++) this.perm[i] = this.p[i & 255];
+    },
+    
+    dot(g, x, y) {
+        return g[0] * x + g[1] * y;
+    },
+    
+    noise2D(xin, yin) {
+        if (!this.perm.length) this.seed();
+        
+        const F2 = 0.5 * (Math.sqrt(3) - 1);
+        const G2 = (3 - Math.sqrt(3)) / 6;
+        
+        const s = (xin + yin) * F2;
+        const i = Math.floor(xin + s);
+        const j = Math.floor(yin + s);
+        
+        const t = (i + j) * G2;
+        const X0 = i - t;
+        const Y0 = j - t;
+        const x0 = xin - X0;
+        const y0 = yin - Y0;
+        
+        const i1 = x0 > y0 ? 1 : 0;
+        const j1 = x0 > y0 ? 0 : 1;
+        
+        const x1 = x0 - i1 + G2;
+        const y1 = y0 - j1 + G2;
+        const x2 = x0 - 1 + 2 * G2;
+        const y2 = y0 - 1 + 2 * G2;
+        
+        const ii = i & 255;
+        const jj = j & 255;
+        const gi0 = this.perm[ii + this.perm[jj]] % 12;
+        const gi1 = this.perm[ii + i1 + this.perm[jj + j1]] % 12;
+        const gi2 = this.perm[ii + 1 + this.perm[jj + 1]] % 12;
+        
+        let t0 = 0.5 - x0 * x0 - y0 * y0;
+        let n0 = t0 < 0 ? 0 : Math.pow(t0, 4) * this.dot(this.grad3[gi0], x0, y0);
+        
+        let t1 = 0.5 - x1 * x1 - y1 * y1;
+        let n1 = t1 < 0 ? 0 : Math.pow(t1, 4) * this.dot(this.grad3[gi1], x1, y1);
+        
+        let t2 = 0.5 - x2 * x2 - y2 * y2;
+        let n2 = t2 < 0 ? 0 : Math.pow(t2, 4) * this.dot(this.grad3[gi2], x2, y2);
+        
+        return 70 * (n0 + n1 + n2);
+    }
 };
 
 const Persistence = {
@@ -602,6 +677,19 @@ const SaveTrigger = {
     }
 };
 
+// Types de blocs disponibles
+const BLOCK_TYPES = {
+    stone: { color: 0x808080, name: 'Pierre' },
+    dirt: { color: 0x8B4513, name: 'Terre' },
+    wood: { color: 0xDEB887, name: 'Bois' },
+    grass: { color: 0x228B22, name: 'Herbe' },
+    sand: { color: 0xF4A460, name: 'Sable' },
+    snow: { color: 0xFFFAFA, name: 'Neige' },
+    water: { color: 0x1E90FF, name: 'Eau' },
+    obsidian: { color: 0x1C1C1C, name: 'Obsidienne' },
+    gold: { color: 0xFFD700, name: 'Or' }
+};
+
 const State = {
     peer: null,
     username: "",
@@ -618,7 +706,13 @@ const State = {
     isInitialized: false,
     isTabActive: true,
     chatActive: false,
-    lamportClock: 0  // Horloge de Lamport pour ordre logique
+    lamportClock: 0,  // Horloge de Lamport pour ordre logique
+    // Inventaire du joueur (9 slots)
+    inventory: [
+        'stone', 'dirt', 'wood', 'grass', 'sand', 
+        'snow', 'water', 'obsidian', 'gold'
+    ],
+    selectedSlot: 0  // Slot actuellement sélectionné (0-8)
 };
 
 const Engine = {
@@ -746,6 +840,8 @@ const Network = {
             console.log(`📍 Position restaurée pour ${State.username}: (${playerData.lastPosition.x.toFixed(1)}, ${playerData.lastPosition.y.toFixed(1)}, ${playerData.lastPosition.z.toFixed(1)})`);
         } else {
             console.log(`🆕 Nouveau joueur ${State.username}, position par défaut`);
+            // Générer le terrain procédural pour nouveau joueur
+            this.generateProceduralTerrain();
         }
 
         // Charger le monde sauvegardé
@@ -794,6 +890,12 @@ const Network = {
             
             // Si chat actif, ne pas traiter les touches de jeu
             if (State.chatActive) return;
+            
+            // Sélection de slot d'inventaire (touches 1-9)
+            if (e.key >= '1' && e.key <= '9') {
+                State.selectedSlot = parseInt(e.key) - 1;
+                this.updateHotbar();
+            }
             
             this.keys[e.code] = true;
         });
@@ -860,6 +962,9 @@ const Network = {
             const val = parseFloat(e.target.value) / 10;
             this.broadcast({ type: 'law', key: 'gravity', value: val });
         };
+        
+        // Initialiser la hotbar (barre d'inventaire)
+        this.initHotbar();
     },
 
     updateLockUI() {
@@ -947,6 +1052,48 @@ const Network = {
         return div.innerHTML;
     },
     
+    // === HOTBAR / INVENTAIRE ===
+    
+    initHotbar() {
+        const hotbar = document.getElementById('hotbar');
+        hotbar.innerHTML = '';
+        
+        State.inventory.forEach((blockType, index) => {
+            const slot = document.createElement('div');
+            const blockInfo = BLOCK_TYPES[blockType];
+            const colorHex = '#' + blockInfo.color.toString(16).padStart(6, '0');
+            
+            slot.className = `interactive w-14 h-14 glass rounded-lg flex flex-col items-center justify-center cursor-pointer transition-all border-2 ${
+                index === State.selectedSlot ? 'border-blue-500 shadow-lg shadow-blue-500/50' : 'border-transparent hover:border-white/20'
+            }`;
+            slot.innerHTML = `
+                <div class="w-8 h-8 rounded" style="background-color: ${colorHex};"></div>
+                <div class="text-[8px] text-slate-400 mt-1">${index + 1}</div>
+            `;
+            slot.onclick = () => {
+                State.selectedSlot = index;
+                this.updateHotbar();
+            };
+            
+            hotbar.appendChild(slot);
+        });
+        
+        hotbar.classList.remove('hidden');
+    },
+    
+    updateHotbar() {
+        const hotbar = document.getElementById('hotbar');
+        const slots = hotbar.children;
+        
+        for (let i = 0; i < slots.length; i++) {
+            if (i === State.selectedSlot) {
+                slots[i].className = 'interactive w-14 h-14 glass rounded-lg flex flex-col items-center justify-center cursor-pointer transition-all border-2 border-blue-500 shadow-lg shadow-blue-500/50';
+            } else {
+                slots[i].className = 'interactive w-14 h-14 glass rounded-lg flex flex-col items-center justify-center cursor-pointer transition-all border-2 border-transparent hover:border-white/20';
+            }
+        }
+    },
+    
     // === HORLOGE DE LAMPORT ===
     
     // Incrémenter l'horloge lors d'un événement local
@@ -970,6 +1117,74 @@ const Network = {
         // Si horloges identiques, ordre alphabétique du créateur
         return a.creator > b.creator ? a : b;
     },
+    
+    // === GÉNÉRATION PROCÉDURALE ===
+    
+    generateProceduralTerrain() {
+        console.log('🌍 Génération du terrain procédural...');
+        SimplexNoise.seed(Math.random());
+        
+        const size = CONFIG.TERRAIN_SIZE;
+        const maxHeight = CONFIG.TERRAIN_HEIGHT;
+        const offsetX = -size / 2;
+        const offsetZ = -size / 2;
+        
+        let blockCount = 0;
+        
+        for (let x = 0; x < size; x++) {
+            for (let z = 0; z < size; z++) {
+                // Générer hauteur avec bruit simplex (plusieurs octaves)
+                const scale = 0.08;
+                const height1 = SimplexNoise.noise2D(x * scale, z * scale);
+                const height2 = SimplexNoise.noise2D(x * scale * 2, z * scale * 2) * 0.5;
+                const combinedHeight = (height1 + height2) / 1.5;
+                
+                // Convertir en hauteur de blocs (0 à maxHeight)
+                const blockHeight = Math.floor(((combinedHeight + 1) / 2) * maxHeight);
+                
+                // Générer colonne de blocs
+                for (let y = 0; y <= blockHeight; y++) {
+                    let blockType;
+                    
+                    // Sélectionner type selon la hauteur
+                    if (y === blockHeight && y > 2) {
+                        blockType = 'grass';  // Surface
+                    } else if (y === blockHeight && y <= 2) {
+                        blockType = 'sand';   // Niveau de l'eau
+                    } else if (y > blockHeight - 3) {
+                        blockType = 'dirt';   // Sous-sol proche
+                    } else {
+                        blockType = 'stone';  // Roche profonde
+                    }
+                    
+                    // Neige sur les hauteurs
+                    if (blockHeight >= maxHeight - 2 && y === blockHeight) {
+                        blockType = 'snow';
+                    }
+                    
+                    const recipe = {
+                        id: `terrain_${x}_${y}_${z}`,
+                        t: 'block',
+                        blockType: blockType,
+                        p: { x: offsetX + x, y: y, z: offsetZ + z },
+                        c: BLOCK_TYPES[blockType].color,
+                        creator: 'terrain_gen',
+                        lamport: this.tick(),
+                        ts: Date.now(),
+                        witnesses: []
+                    };
+                    
+                    this.commitToWorld(recipe);
+                    blockCount++;
+                }
+            }
+        }
+        
+        console.log(`✅ Terrain généré: ${blockCount} blocs créés`);
+        
+        // Positionner le joueur au centre du terrain
+        Engine.player.position.set(0, maxHeight + 5, 0);
+    },
 
     // LE QUORUM : On ne construit pas tout de suite, on demande au maillage
     requestAction(type) {
@@ -978,11 +1193,16 @@ const Network = {
             Engine.camera.getWorldDirection(dir);
             const pos = new THREE.Vector3().copy(Engine.player.position).add(dir.multiplyScalar(4));
             
+            // Récupérer le type de bloc sélectionné dans l'inventaire
+            const blockType = State.inventory[State.selectedSlot];
+            const blockColor = State.isArchitect ? 0xef4444 : BLOCK_TYPES[blockType].color;
+            
             const recipe = {
                 id: `ent_${Math.random().toString(36).substr(2, 9)}`,
                 t: 'block',
+                blockType: blockType,  // Type de bloc (stone, dirt, etc.)
                 p: { x: Math.round(pos.x), y: Math.round(pos.y), z: Math.round(pos.z) },
-                c: State.isArchitect ? 0xef4444 : this.getHashColor(State.username),
+                c: blockColor,
                 creator: State.username,
                 lamport: this.tick(),  // Horloge de Lamport au lieu de timestamp
                 ts: Date.now(),  // Garder timestamp pour compatibilité/debug
