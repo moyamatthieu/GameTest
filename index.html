@@ -102,6 +102,19 @@
         <p class="text-slate-400 text-[9px]">Cliquez pour contrôler</p>
     </div>
     
+    <!-- Chat System -->
+    <div id="chat-container" class="hidden interactive absolute bottom-6 left-6 w-96">
+        <div class="glass p-3 rounded-xl space-y-2">
+            <div id="chat-messages" class="h-40 overflow-y-auto text-[10px] font-mono text-slate-300 bg-black/30 p-2 rounded border border-white/5 space-y-1">
+                <div class="text-slate-500 italic">Appuyez sur Entrée pour chatter...</div>
+            </div>
+            <div id="chat-input-container" class="hidden">
+                <input id="chat-input" type="text" placeholder="Message..." maxlength="100"
+                    class="w-full p-2 bg-slate-800/50 text-white text-[11px] rounded border border-slate-700 focus:border-blue-500 outline-none">
+            </div>
+        </div>
+    </div>
+    
     <div id="crosshair"></div>
 </div>
 
@@ -598,11 +611,14 @@ const State = {
     connections: new Map(),
     avatars: new Map(),
     worldRegistry: new Map(), // Registre des "Recettes" (ID -> Data)
+    pendingActions: new Map(), // Actions en attente de validation (quorum)
     gravity: 9.81,
     velocityY: 0,
     isGrounded: true,
     isInitialized: false,
-    isTabActive: true
+    isTabActive: true,
+    chatActive: false,
+    lamportClock: 0  // Horloge de Lamport pour ordre logique
 };
 
 const Engine = {
@@ -751,6 +767,9 @@ const Network = {
             
             // Initialiser le système de sauvegarde intelligent
             SaveTrigger.init();
+            
+            // Afficher le chat
+            document.getElementById('chat-container').classList.remove('hidden');
         });
 
         State.peer.on('connection', (conn) => this.bindEvents(conn));
@@ -765,8 +784,25 @@ const Network = {
         });
 
         // Input Bindings
-        window.addEventListener('keydown', (e) => this.keys[e.code] = true);
-        window.addEventListener('keyup', (e) => this.keys[e.code] = false);
+        window.addEventListener('keydown', (e) => {
+            // Touche Entrée = activer/désactiver chat
+            if (e.code === 'Enter') {
+                this.toggleChat();
+                e.preventDefault();
+                return;
+            }
+            
+            // Si chat actif, ne pas traiter les touches de jeu
+            if (State.chatActive) return;
+            
+            this.keys[e.code] = true;
+        });
+        window.addEventListener('keyup', (e) => {
+            // Si chat actif, ne pas traiter les touches de jeu
+            if (State.chatActive) return;
+            
+            this.keys[e.code] = false;
+        });
         
         // Pause uniquement si on change d'onglet (pas si souris quitte la fenêtre)
         document.addEventListener('visibilitychange', () => {
@@ -796,7 +832,17 @@ const Network = {
                 Engine.renderer.domElement.requestPointerLock();
                 return; 
             }
-            this.requestAction('build');
+            // Clic gauche = construction, clic droit = destruction
+            if (e.button === 0) {
+                this.requestAction('build');
+            } else if (e.button === 2) {
+                this.requestAction('destroy');
+            }
+        });
+        
+        // Empêcher le menu contextuel du clic droit
+        window.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
         });
 
         window.addEventListener('mousemove', (e) => {
@@ -831,6 +877,99 @@ const Network = {
         log.innerHTML += `<div>> ${msg}</div>`;
         log.scrollTop = log.scrollHeight;
     },
+    
+    // === SYSTÈME DE CHAT ===
+    
+    toggleChat() {
+        State.chatActive = !State.chatActive;
+        const inputContainer = document.getElementById('chat-input-container');
+        const input = document.getElementById('chat-input');
+        
+        if (State.chatActive) {
+            // Activer le chat
+            inputContainer.classList.remove('hidden');
+            input.focus();
+            document.exitPointerLock();
+        } else {
+            // Désactiver le chat
+            const message = input.value.trim();
+            if (message) {
+                this.sendChatMessage(message);
+            }
+            inputContainer.classList.add('hidden');
+            input.value = '';
+        }
+    },
+    
+    sendChatMessage(message) {
+        if (!message) return;
+        
+        const chatData = {
+            type: 'chat',
+            username: State.username,
+            message: message,
+            color: State.myColor,
+            timestamp: Date.now()
+        };
+        
+        // Afficher localement
+        this.displayChatMessage(chatData);
+        
+        // Broadcaster aux pairs
+        this.broadcast(chatData);
+    },
+    
+    displayChatMessage(data) {
+        const messagesDiv = document.getElementById('chat-messages');
+        const messageEl = document.createElement('div');
+        
+        // Format: [HH:MM] Username: Message
+        const time = new Date(data.timestamp).toLocaleTimeString('fr-FR', { 
+            hour: '2-digit', 
+            minute: '2-digit' 
+        });
+        
+        const colorHex = '#' + data.color.toString(16).padStart(6, '0');
+        messageEl.innerHTML = `<span class="text-slate-500">[${time}]</span> <span style="color: ${colorHex}; font-weight: bold;">${data.username}:</span> ${this.escapeHtml(data.message)}`;
+        
+        messagesDiv.appendChild(messageEl);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        
+        // Limiter à 50 messages
+        while (messagesDiv.children.length > 50) {
+            messagesDiv.removeChild(messagesDiv.firstChild);
+        }
+    },
+    
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    },
+    
+    // === HORLOGE DE LAMPORT ===
+    
+    // Incrémenter l'horloge lors d'un événement local
+    tick() {
+        State.lamportClock++;
+        return State.lamportClock;
+    },
+    
+    // Synchroniser avec une horloge reçue
+    sync(receivedClock) {
+        State.lamportClock = Math.max(State.lamportClock, receivedClock) + 1;
+        return State.lamportClock;
+    },
+    
+    // Résoudre un conflit (timestamp identique)
+    resolveConflict(a, b) {
+        // Si horloges différentes, le plus grand gagne
+        if (a.lamport !== b.lamport) {
+            return a.lamport > b.lamport ? a : b;
+        }
+        // Si horloges identiques, ordre alphabétique du créateur
+        return a.creator > b.creator ? a : b;
+    },
 
     // LE QUORUM : On ne construit pas tout de suite, on demande au maillage
     requestAction(type) {
@@ -845,22 +984,176 @@ const Network = {
                 p: { x: Math.round(pos.x), y: Math.round(pos.y), z: Math.round(pos.z) },
                 c: State.isArchitect ? 0xef4444 : this.getHashColor(State.username),
                 creator: State.username,
-                ts: Date.now()
+                lamport: this.tick(),  // Horloge de Lamport au lieu de timestamp
+                ts: Date.now(),  // Garder timestamp pour compatibilité/debug
+                witnesses: []  // Liste des témoins
             };
 
-            this.log(`Intention: ${recipe.id}`);
-            // Envoi de l'intention aux pairs pour validation (Quorum de voisinage)
-            this.broadcast({ type: 'intent_build', recipe });
-            // Optimistic rendering (on le place pour nous, mais il peut disparaître si rejeté)
-            this.commitToWorld(recipe);
+            // Admin bypass le quorum
+            if (State.isArchitect) {
+                this.log(`✅ Admin: ${recipe.id} [L${recipe.lamport}] - Direct`);
+                this.broadcast({ type: 'intent_build', recipe, lamport: recipe.lamport });
+                this.commitToWorld(recipe);
+                SaveTrigger.recordAction('build', { recipeId: recipe.id });
+                return;
+            }
+
+            // Si seul, pas besoin de quorum
+            if (State.connections.size === 0) {
+                this.log(`✅ Solo: ${recipe.id} [L${recipe.lamport}]`);
+                this.commitToWorld(recipe);
+                SaveTrigger.recordAction('build', { recipeId: recipe.id });
+                return;
+            }
+
+            // Demander quorum
+            this.log(`⏳ Quorum: ${recipe.id} [L${recipe.lamport}] - En attente...`);
+            State.pendingActions.set(recipe.id, {
+                recipe,
+                witnesses: [],
+                requiredWitnesses: 1,
+                timeout: setTimeout(() => {
+                    this.checkQuorum(recipe.id);
+                }, 500)  // 500ms timeout
+            });
             
-            // 🔔 Déclencher sauvegarde (action critique)
-            SaveTrigger.recordAction('build', { recipeId: recipe.id });
+            // Broadcast demande de validation
+            this.broadcast({ 
+                type: 'request_witness', 
+                recipe, 
+                lamport: recipe.lamport,
+                requester: State.username
+            });
         }
+        else if (type === 'destroy') {
+            // Raycast pour trouver le bloc visé
+            const targetBlock = this.raycastBlock();
+            if (targetBlock) {
+                const lamport = this.tick();
+                this.log(`Destruction: ${targetBlock.id} [L${lamport}]`);
+                // Broadcast intention de destruction
+                this.broadcast({ type: 'intent_destroy', blockId: targetBlock.id, lamport });
+                // Optimistic deletion
+                this.destroyFromWorld(targetBlock.id);
+                
+                // 🔔 Déclencher sauvegarde (action critique)
+                SaveTrigger.recordAction('destroy', { blockId: targetBlock.id });
+            }
+        }
+    },
+    
+    // Raycast pour trouver le bloc visé
+    raycastBlock() {
+        const raycaster = new THREE.Raycaster();
+        const dir = new THREE.Vector3();
+        Engine.camera.getWorldDirection(dir);
+        raycaster.set(Engine.camera.position, dir);
+        
+        // Chercher dans les blocs
+        const meshes = Array.from(State.worldRegistry.values()).map(v => v.mesh);
+        const intersects = raycaster.intersectObjects(meshes);
+        
+        if (intersects.length > 0) {
+            // Trouver l'ID du bloc touché
+            for (let [id, data] of State.worldRegistry) {
+                if (data.mesh === intersects[0].object) {
+                    return { id, ...data };
+                }
+            }
+        }
+        return null;
+    },
+    
+    // Supprimer un bloc du monde
+    destroyFromWorld(blockId) {
+        const data = State.worldRegistry.get(blockId);
+        if (data) {
+            Engine.worldGroup.remove(data.mesh);
+            data.mesh.geometry.dispose();
+            data.mesh.material.dispose();
+            State.worldRegistry.delete(blockId);
+            document.getElementById('stats-entities').innerText = State.worldRegistry.size;
+        }
+    },
+    
+    // === SYSTÈME DE QUORUM ===
+    
+    // Vérifier si le quorum est atteint
+    checkQuorum(recipeId) {
+        const pending = State.pendingActions.get(recipeId);
+        if (!pending) return;
+        
+        const witnesses = pending.witnesses.length;
+        const required = pending.requiredWitnesses;
+        
+        if (witnesses >= required) {
+            // Quorum atteint ✅
+            this.log(`✅ Quorum OK: ${recipeId} (${witnesses}/${required} témoins)`);
+            this.commitToWorld(pending.recipe);
+            this.broadcast({ type: 'intent_build', recipe: pending.recipe, lamport: pending.recipe.lamport });
+            SaveTrigger.recordAction('build', { recipeId });
+        } else {
+            // Quorum échoué ❌
+            this.log(`❌ Quorum KO: ${recipeId} (${witnesses}/${required} témoins) - Annulé`);
+        }
+        
+        // Nettoyer
+        clearTimeout(pending.timeout);
+        State.pendingActions.delete(recipeId);
+    },
+    
+    // Ajouter un témoin à une action en attente
+    addWitness(recipeId, witness) {
+        const pending = State.pendingActions.get(recipeId);
+        if (!pending) return;
+        
+        if (!pending.witnesses.includes(witness)) {
+            pending.witnesses.push(witness);
+            this.log(`👁️ Témoin: ${witness} pour ${recipeId}`);
+            
+            // Vérifier immédiatement si quorum atteint
+            if (pending.witnesses.length >= pending.requiredWitnesses) {
+                this.checkQuorum(recipeId);
+            }
+        }
+    },
+    
+    // Valider une action d'un pair (devenir témoin)
+    witnessAction(recipe, requester) {
+        // Conditions pour être témoin :
+        // 1. Pas le créateur
+        // 2. Distance raisonnable (optionnel pour simplifier)
+        if (requester === State.username) return;
+        
+        // Valider automatiquement (version simple)
+        this.broadcast({
+            type: 'witness_ack',
+            recipeId: recipe.id,
+            witness: State.username,
+            requester: requester
+        });
+        
+        this.log(`👁️ Je témoigne pour ${recipe.id} de ${requester}`);
     },
 
     commitToWorld(recipe) {
-        if (State.worldRegistry.has(recipe.id)) return;
+        // Vérifier s'il existe déjà
+        if (State.worldRegistry.has(recipe.id)) {
+            const existing = State.worldRegistry.get(recipe.id);
+            // Résoudre le conflit avec Lamport
+            if (recipe.lamport && existing.recipe.lamport) {
+                const winner = this.resolveConflict(recipe, existing.recipe);
+                if (winner === existing.recipe) {
+                    console.log(`⚖️ Conflit résolu: ${existing.recipe.creator} garde le bloc`);
+                    return; // L'ancien gagne
+                }
+                // Le nouveau gagne, on supprime l'ancien
+                console.log(`⚖️ Conflit résolu: ${recipe.creator} remplace le bloc`);
+                this.destroyFromWorld(recipe.id);
+            } else {
+                return; // Déjà présent, on ignore
+            }
+        }
         
         const geo = new THREE.BoxGeometry(1, 1, 1);
         const mat = new THREE.MeshStandardMaterial({ color: recipe.c });
@@ -891,7 +1184,17 @@ const Network = {
             move.normalize();
             // Appliquer la rotation de la caméra au vecteur de mouvement
             move.applyAxisAngle(new THREE.Vector3(0, 1, 0), Engine.cameraData.yaw);
+            
+            // Sauvegarder la position avant mouvement
+            const oldPos = Engine.player.position.clone();
             Engine.player.position.add(move.multiplyScalar(speed));
+            
+            // Vérifier collision avec les blocs
+            if (this.checkBlockCollision()) {
+                // Collision détectée, annuler le mouvement
+                Engine.player.position.copy(oldPos);
+            }
+            
             // Orienter le personnage dans la direction du mouvement
             Engine.player.rotation.y = Math.atan2(move.x, move.z);
         }
@@ -904,7 +1207,18 @@ const Network = {
         
         // Gravité et physique verticale
         State.velocityY -= State.gravity * 0.002;
+        const oldY = Engine.player.position.y;
         Engine.player.position.y += State.velocityY;
+        
+        // Vérifier collision verticale
+        if (this.checkBlockCollision()) {
+            // Collision en tombant/sautant
+            Engine.player.position.y = oldY;
+            State.velocityY = 0;
+            if (oldY > Engine.player.position.y || State.velocityY < 0) {
+                State.isGrounded = true;
+            }
+        }
         
         // Collision avec le sol
         if (Engine.player.position.y <= 0) {
@@ -926,6 +1240,46 @@ const Network = {
             r: Engine.player.rotation.y,
             color: State.myColor
         });
+    },
+    
+    // Détection de collision AABB (Axis-Aligned Bounding Box)
+    checkBlockCollision() {
+        if (!Engine.player) return false;
+        
+        // Hitbox du joueur (cylindre simplifié en AABB)
+        const playerRadius = 0.3;
+        const playerHeight = 1.8;
+        const playerBox = {
+            minX: Engine.player.position.x - playerRadius,
+            maxX: Engine.player.position.x + playerRadius,
+            minY: Engine.player.position.y,
+            maxY: Engine.player.position.y + playerHeight,
+            minZ: Engine.player.position.z - playerRadius,
+            maxZ: Engine.player.position.z + playerRadius
+        };
+        
+        // Vérifier collision avec chaque bloc
+        for (let [id, data] of State.worldRegistry) {
+            const blockPos = data.recipe.p;
+            // Hitbox du bloc (1x1x1)
+            const blockBox = {
+                minX: blockPos.x - 0.5,
+                maxX: blockPos.x + 0.5,
+                minY: blockPos.y - 0.5,
+                maxY: blockPos.y + 0.5,
+                minZ: blockPos.z - 0.5,
+                maxZ: blockPos.z + 0.5
+            };
+            
+            // Test AABB
+            if (playerBox.maxX > blockBox.minX && playerBox.minX < blockBox.maxX &&
+                playerBox.maxY > blockBox.minY && playerBox.minY < blockBox.maxY &&
+                playerBox.maxZ > blockBox.minZ && playerBox.minZ < blockBox.maxZ) {
+                return true; // Collision détectée
+            }
+        }
+        
+        return false;
     },
 
     broadcast(data) {
@@ -974,6 +1328,11 @@ const Network = {
         });
         
         conn.on('data', (data) => {
+            // Synchroniser l'horloge de Lamport si présente
+            if (data.lamport !== undefined) {
+                this.sync(data.lamport);
+            }
+            
             switch(data.type) {
                 case 'pos': 
                     // Mettre à jour la couleur si fournie
@@ -982,8 +1341,17 @@ const Network = {
                     }
                     this.handleRemotePos(conn.peer, data); 
                     break;
-                case 'intent_build': this.commitToWorld(data.recipe); break;
+                case 'intent_build': 
+                    this.commitToWorld(data.recipe); 
+                    break;
+                case 'intent_destroy': 
+                    this.destroyFromWorld(data.blockId); 
+                    break;
                 case 'sync_world': data.data.forEach(r => this.commitToWorld(r)); break;
+                case 'chat':
+                    // Message de chat reçu
+                    this.displayChatMessage(data);
+                    break;
                 case 'identity':
                     // Un pair m'informe de son identité
                     // Stocker sa couleur
@@ -1001,6 +1369,16 @@ const Network = {
                     // Un pair me partage sa liste de pairs connus
                     if (data.peers && Array.isArray(data.peers)) {
                         data.peers.forEach(peerId => this.discoverPeer(peerId));
+                    }
+                    break;
+                case 'request_witness':
+                    // Un pair demande validation pour une action
+                    this.witnessAction(data.recipe, data.requester);
+                    break;
+                case 'witness_ack':
+                    // Un pair valide mon action
+                    if (data.requester === State.username) {
+                        this.addWitness(data.recipeId, data.witness);
                     }
                     break;
                 case 'law': 
