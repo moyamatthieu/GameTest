@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GameTest - RPG UI</title>
+    <link rel="stylesheet" href="src/ui/style.css">
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        canvas { display: block; }
+    </style>
+</head>
+<body draggable="false">
+    <!-- HUD Joueur -->
+    <div id="player-hud" class="ui-container">
+        <div class="stats-bars">
+            <div class="bar-container hp">
+                <div id="player-hp-bar" class="bar-fill"></div>
+                <span id="player-hp-text">HP: 100/100</span>
+            </div>
+            <div class="bar-container mp">
+                <div id="player-mp-bar" class="bar-fill"></div>
+                <span id="player-mp-text">MP: 50/50</span>
+            </div>
+            <div class="bar-container stamina">
+                <div id="player-stamina-bar" class="bar-fill"></div>
+                <span id="player-stamina-text">SP: 100/100</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- HUD Cible -->
+    <div id="target-hud" class="ui-container hidden">
+        <div class="target-info">
+            <div id="target-name">Cible</div>
+            <div class="bar-container hp small">
+                <div id="target-hp-bar" class="bar-fill"></div>
+                <span id="target-hp-text">100/100</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat -->
+    <div id="chat-container" class="ui-container">
+        <div id="chat-messages"></div>
+        <div class="chat-input-container">
+            <input type="text" id="chat-input" placeholder="Appuyez sur Entrée pour parler..." autocomplete="off">
+        </div>
+    </div>
+
+    <!-- Journal de Combat -->
+    <div id="combat-log" class="ui-container">
+        <div id="combat-messages"></div>
+    </div>
+
+    <!-- Inventaire -->
+    <div id="inventory-window" class="ui-window hidden">
+        <div class="window-header">
+            <span>Inventaire</span>
+            <button class="close-btn" id="close-inventory">X</button>
+        </div>
+        <div id="inventory-grid" class="grid-container">
+            <!-- Les slots d'inventaire seront générés ici -->
+        </div>
+    </div>
+
+    <!-- Fiche Personnage (Équipement) -->
+    <div id="character-window" class="ui-window hidden">
+        <div class="window-header">
+            <span>Personnage</span>
+            <button class="close-btn" id="close-character">X</button>
+        </div>
+        <div class="character-content">
+            <div class="equipment-slots">
+                <div class="equip-slot" id="slot-MAIN_HAND" data-slot-type="equipment" data-slot-id="MAIN_HAND" title="Main Droite">
+                    <span class="slot-label">Main Droite</span>
+                    <div class="slot-icon" id="icon-MAIN_HAND"></div>
+                </div>
+                <div class="equip-slot" id="slot-OFF_HAND" data-slot-type="equipment" data-slot-id="OFF_HAND" title="Main Gauche">
+                    <span class="slot-label">Main Gauche</span>
+                    <div class="slot-icon" id="icon-OFF_HAND"></div>
+                </div>
+            </div>
+            <div class="character-stats">
+                <div id="stat-attack">Attaque: 5</div>
+                <div id="stat-defense">Défense: 0</div>
+                <div id="stat-speed">Vitesse: 5</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Barre d'actions (Capacités) -->
+    <div id="action-bar" class="ui-container">
+        <div class="action-slot" data-key="1" title="Attaque Mêlée (1)">
+            <div class="key-bind">1</div>
+            <div class="icon melee"></div>
+        </div>
+        <div class="action-slot" data-key="2" title="Boule de Feu (2)">
+            <div class="key-bind">2</div>
+            <div class="icon fireball"></div>
+        </div>
+        <div class="action-slot" data-key="3" title="Soin (3)">
+            <div class="key-bind">3</div>
+            <div class="icon heal"></div>
+        </div>
+        <div class="action-slot" data-key="C" title="Artisanat (C)">
+            <div class="key-bind">C</div>
+            <div class="icon craft"></div>
+        </div>
+    </div>
+
+    <script type="module" src="/src/index.ts"></script>
+</body>
+</html>

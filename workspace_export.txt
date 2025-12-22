@@ -1,0 +1,2885 @@
+================================================================================
+FILE: ./ARCHITECTURE.md
+================================================================================
+# Architecture Technique : Clone MMO DAoC
+
+Ce document définit l'architecture technique pour un clone de Dark Age of Camelot (DAoC) utilisant TypeScript, Node.js et Three.js/Babylon.js.
+
+## 1. Structure du Projet (Monorepo)
+
+Le projet utilise une structure de monorepo pour faciliter le partage de code entre le client et le serveur.
+
+```text
+/workspaces/GameTest/
+├── client/                # Application Frontend (Three.js/Babylon.js)
+│   ├── src/
+│   │   ├── engine/        # Logique de rendu et boucle de jeu client
+│   │   ├── network/       # Gestionnaire Socket.io client
+│   │   └── ui/            # Interface utilisateur (HUD, Inventaire)
+├── server/                # Application Backend (Node.js)
+│   ├── src/
+│   │   ├── game/          # Boucle de jeu serveur et validation
+│   │   ├── network/       # Gestionnaire Socket.io serveur
+│   │   └── database/      # Persistance des données (PostgreSQL/MongoDB)
+├── shared/                # Code partagé (Isomorphique)
+│   ├── src/
+│   │   ├── ecs/           # Définitions des composants et systèmes de base
+│   │   ├── constants/     # Constantes de jeu (vitesse, portées, etc.)
+│   │   └── types/         # Interfaces TypeScript pour le réseau et les données
+├── assets/                # Ressources statiques (Modèles 3D, Textures)
+└── package.json           # Configuration des Workspaces npm/yarn
+```
+
+## 2. Système ECS (Entity Component System)
+
+L'ECS est le cœur de la logique de jeu, partagé entre le client et le serveur pour assurer la cohérence.
+
+### Composants (Data)
+- **Position** : `x, y, z, rotationY`
+- **Velocity** : `vx, vy, vz` (utilisé pour la prédiction)
+- **Stats** : `hp, maxHp, mana, maxMana, stamina, level`
+- **Identity** : `name, class, realm (Albion/Hibernia/Midgard)`
+- **Inventory** : `items: ItemSlot[]`
+- **CombatState** : `targetId, isCasting, lastAttackTimestamp`
+- **NetworkSync** : `lastTick, sequenceNumber` (pour la réconciliation)
+
+### Systèmes (Logic)
+- **MovementSystem** : Calcule la nouvelle position basée sur la vélocité et les collisions.
+- **CombatSystem** : Gère les calculs de dégâts, les résistances et les états (stun, root).
+- **AISystem** (Serveur uniquement) : Gère les machines à états des PNJs (Patrouille, Chasse, Retour).
+- **SyncSystem** : 
+    - Côté Serveur : Diffuse les snapshots aux clients.
+    - Côté Client : Applique les snapshots et gère l'interpolation des autres joueurs.
+
+## 3. Protocole Réseau (Socket.io)
+
+La communication est basée sur des événements typés.
+
+| Message | Direction | Description |
+| :--- | :--- | :--- |
+| `PLAYER_INPUT` | C -> S | Inputs (ZQSD, Jump) + Sequence Number |
+| `WORLD_UPDATE` | S -> C | Snapshot des entités visibles (Position, Stats) |
+| `COMBAT_ACTION` | C -> S | Utilisation d'une compétence ou attaque |
+| `ENTITY_EVENT` | S -> C | Événements ponctuels (Mort, Level up, Loot) |
+| `CHAT_MSG` | Bidir | Messages de chat (Canal, Groupe, Royaume) |
+
+## 4. Modèle de Données
+
+### Objets (Items)
+```typescript
+interface Item {
+  id: string;
+  templateId: string;
+  type: 'WEAPON' | 'ARMOR' | 'CONSUMABLE';
+  stats: { strength?: number, quickness?: number, etc. };
+  weight: number;
+}
+```
+
+### Quêtes
+```typescript
+interface Quest {
+  id: string;
+  objectives: { type: 'KILL' | 'COLLECT' | 'TALK', targetId: string, count: number }[];
+  rewards: { xp: number, gold: number, items: string[] };
+}
+```
+
+### PNJs
+```typescript
+interface NPC {
+  templateId: string;
+  level: number;
+  aggroType: 'PASSIVE' | 'AGGRESSIVE' | 'NEUTRAL';
+  spawnPoint: { x: number, y: number, z: number };
+  lootTable: { itemId: string, chance: number }[];
+}
+```
+
+## 5. Stratégie de Synchronisation
+
+### Prédiction Client
+Le client n'attend pas la réponse du serveur pour se déplacer. Il applique les inputs immédiatement au `MovementSystem` local.
+
+### Réconciliation Serveur
+1. Le client envoie chaque input avec un `sequenceNumber`.
+2. Le serveur traite l'input, calcule la position officielle et la renvoie avec le `sequenceNumber` correspondant.
+3. Si la position serveur diffère trop de la position prédite par le client :
+    - Le client remplace sa position par celle du serveur.
+    - Le client rejoue tous les inputs locaux qui n'ont pas encore été validés par le serveur pour "rattraper" le retard.
+
+### Interpolation des Entités
+Pour les autres joueurs et PNJs, le client ne fait pas de prédiction. Il reçoit des snapshots et interpole les positions entre le dernier snapshot reçu et le précédent pour assurer un mouvement fluide (généralement avec un délai de 100ms).
+
+## 6. Diagramme de Flux Réseau (Réconciliation)
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Serveur
+
+    Note over C: Input: Z (Avancer)
+    C->>C: Applique mouvement local (Prédiction)
+    C->>S: PLAYER_INPUT { seq: 101, input: Z }
+    
+    Note over S: Valide mouvement
+    S->>C: WORLD_UPDATE { last_seq: 101, pos: {x:10, y:0, z:5} }
+
+    alt Position Correcte
+        Note over C: Continue normalement
+    else Écart trop important
+        Note over C: Réconciliation
+        C->>C: Reset position à {x:10, y:0, z:5}
+        C->>C: Rejoue les inputs après seq 101
+    end
+```
+
+
+
+================================================================================
+FILE: ./README.md
+================================================================================
+# DAoC Clone - Projet de Jeu MMO
+
+Ce projet est un prototype de jeu MMO inspiré par Dark Age of Camelot (DAoC), utilisant une architecture ECS (Entity Component System) partagée entre le client et le serveur.
+
+## Technologies utilisées
+
+- **Langage** : TypeScript
+- **Frontend** : Three.js, Vite, Socket.io-client
+- **Backend** : Node.js, Express, Socket.io
+- **Architecture** : ECS (Entity Component System) personnalisé
+
+## Structure du Projet
+
+- `client/` : Code source du client (rendu 3D, UI, prédiction).
+- `server/` : Code source du serveur (logique de jeu, IA, gestion des quêtes).
+- `shared/` : Code partagé (définitions ECS, composants, systèmes de mouvement/combat).
+
+## Installation
+
+1. Clonez le dépôt.
+2. Installez les dépendances à la racine du projet :
+   ```bash
+   npm install
+   ```
+
+## Lancement en mode Développement
+
+Pour lancer simultanément le serveur et le client en mode développement :
+
+```bash
+npm run dev
+```
+
+Le serveur sera accessible sur `http://localhost:3000` et le client sur `http://localhost:5173` (ou le port indiqué par Vite).
+
+## Compilation pour la Production
+
+Pour compiler l'ensemble du projet :
+
+1. **Shared** :
+   ```bash
+   npx tsc -p shared/tsconfig.json
+   ```
+
+2. **Serveur** :
+   ```bash
+   npx tsc -p server/tsconfig.json
+   ```
+
+3. **Client** :
+   ```bash
+   npm run build -w client
+   ```
+
+## Fonctionnalités implémentées
+
+- **Mouvement** : Prédiction client et réconciliation serveur.
+- **Combat** : Système de ciblage (Tab ou clic), capacités (touches 1, 2, 3), log de combat.
+- **Inventaire** : Collecte d'objets, artisanat (touche C), utilisation de potions (touche P).
+- **Quêtes** : Système de quêtes avec objectifs de collecte et de chasse. Interaction avec les PNJs (touche F).
+- **IA** : PNJs avec comportements de patrouille et d'agression.
+- **UI** : Barres de vie, chat, inventaire, HUD de cible.
+
+## Commandes de Jeu
+
+- **ZQSD / Flèches** : Se déplacer.
+- **Tab** : Changer de cible.
+- **1, 2, 3** : Utiliser des capacités.
+- **F** : Interagir avec un PNJ.
+- **I** : Ouvrir/Fermer l'inventaire.
+- **C** : Fabriquer une épée (nécessite du bois et du fer).
+- **P** : Utiliser une potion de soin.
+- **X** : Jeter du bois.
+- **Entrée** : Activer le chat.
+
+
+
+================================================================================
+FILE: ./client/index.html
+================================================================================
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GameTest - RPG UI</title>
+    <link rel="stylesheet" href="src/ui/style.css">
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <!-- HUD Joueur -->
+    <div id="player-hud" class="ui-container">
+        <div class="stats-bars">
+            <div class="bar-container hp">
+                <div id="player-hp-bar" class="bar-fill"></div>
+                <span id="player-hp-text">HP: 100/100</span>
+            </div>
+            <div class="bar-container mp">
+                <div id="player-mp-bar" class="bar-fill"></div>
+                <span id="player-mp-text">MP: 50/50</span>
+            </div>
+            <div class="bar-container stamina">
+                <div id="player-stamina-bar" class="bar-fill"></div>
+                <span id="player-stamina-text">SP: 100/100</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- HUD Cible -->
+    <div id="target-hud" class="ui-container hidden">
+        <div class="target-info">
+            <div id="target-name">Cible</div>
+            <div class="bar-container hp small">
+                <div id="target-hp-bar" class="bar-fill"></div>
+                <span id="target-hp-text">100/100</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat -->
+    <div id="chat-container" class="ui-container">
+        <div id="chat-messages"></div>
+        <div class="chat-input-container">
+            <input type="text" id="chat-input" placeholder="Appuyez sur Entrée pour parler..." autocomplete="off">
+        </div>
+    </div>
+
+    <!-- Journal de Combat -->
+    <div id="combat-log" class="ui-container">
+        <div id="combat-messages"></div>
+    </div>
+
+    <!-- Inventaire -->
+    <div id="inventory-window" class="ui-window hidden">
+        <div class="window-header">
+            <span>Inventaire</span>
+            <button class="close-btn" id="close-inventory">X</button>
+        </div>
+        <div id="inventory-grid" class="grid-container">
+            <!-- Les slots d'inventaire seront générés ici -->
+        </div>
+    </div>
+
+    <!-- Barre d'actions (Capacités) -->
+    <div id="action-bar" class="ui-container">
+        <div class="action-slot" data-key="1" title="Attaque Mêlée (1)">
+            <div class="key-bind">1</div>
+            <div class="icon melee"></div>
+        </div>
+        <div class="action-slot" data-key="2" title="Boule de Feu (2)">
+            <div class="key-bind">2</div>
+            <div class="icon fireball"></div>
+        </div>
+        <div class="action-slot" data-key="3" title="Soin (3)">
+            <div class="key-bind">3</div>
+            <div class="icon heal"></div>
+        </div>
+        <div class="action-slot" data-key="C" title="Artisanat (C)">
+            <div class="key-bind">C</div>
+            <div class="icon craft"></div>
+        </div>
+    </div>
+
+    <script type="module" src="/src/index.ts"></script>
+</body>
+</html>
+
+
+
+================================================================================
+FILE: ./client/package.json
+================================================================================
+{
+  "name": "client",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "shared": "*",
+    "three": "^0.161.0",
+    "socket.io-client": "^4.7.4"
+  },
+  "devDependencies": {
+    "@types/three": "^0.161.2",
+    "vite": "^5.1.4"
+  }
+}
+
+
+
+================================================================================
+FILE: ./client/src/engine/InputHandler.ts
+================================================================================
+export class InputHandler {
+  private keys: Map<string, boolean> = new Map();
+  private keyListeners: Map<string, (() => void)[]> = new Map();
+
+  constructor() {
+    window.addEventListener('keydown', (e) => {
+      if (!this.keys.get(e.code)) {
+        const listeners = this.keyListeners.get(e.code);
+        if (listeners) listeners.forEach(l => l());
+      }
+      this.keys.set(e.code, true);
+    });
+    window.addEventListener('keyup', (e) => this.keys.set(e.code, false));
+  }
+
+  public isPressed(code: string): boolean {
+    return this.keys.get(code) || false;
+  }
+
+  public onKeyPress(code: string, callback: () => void) {
+    if (!this.keyListeners.has(code)) this.keyListeners.set(code, []);
+    this.keyListeners.get(code)!.push(callback);
+  }
+
+  public getMovementState() {
+    return {
+      up: this.isPressed('KeyW') || this.isPressed('ArrowUp'),
+      down: this.isPressed('KeyS') || this.isPressed('ArrowDown'),
+      left: this.isPressed('KeyA') || this.isPressed('ArrowLeft'),
+      right: this.isPressed('KeyD') || this.isPressed('ArrowRight'),
+      jump: this.isPressed('Space')
+    };
+  }
+}
+
+
+
+================================================================================
+FILE: ./client/src/engine/Map.ts
+================================================================================
+import * as THREE from 'three';
+import { MAP_OBSTACLES } from 'shared';
+
+export class GameMap {
+  private scene: THREE.Scene;
+
+  constructor(scene: THREE.Scene) {
+    this.scene = scene;
+    this.init();
+  }
+
+  private init() {
+    // Floor
+    const floorGeometry = new THREE.PlaneGeometry(100, 100);
+    const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
+    const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    this.scene.add(floor);
+
+    // Grid helper for visual reference
+    const gridHelper = new THREE.GridHelper(100, 50, 0x888888, 0x444444);
+    this.scene.add(gridHelper);
+
+    // Obstacles from shared data
+    for (const obs of MAP_OBSTACLES) {
+      this.createObstacle(obs.x, obs.y, obs.z, obs.w, obs.h, obs.d, obs.color);
+    }
+  }
+
+  private createObstacle(x: number, y: number, z: number, w: number, h: number, d: number, color: number) {
+    const geometry = new THREE.BoxGeometry(w, h, d);
+    const material = new THREE.MeshStandardMaterial({ color });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x, y, z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    this.scene.add(mesh);
+  }
+}
+
+
+
+================================================================================
+FILE: ./client/src/engine/RenderSystem.ts
+================================================================================
+import * as THREE from 'three';
+import { System, World, Position, Renderable, RenderType } from 'shared';
+
+export class RenderSystem extends System {
+  private scene: THREE.Scene;
+  public meshes: Map<string, THREE.Mesh> = new Map();
+
+  constructor(scene: THREE.Scene) {
+    super();
+    this.scene = scene;
+  }
+
+  public update(dt: number, world: World): void {
+    const entities = world.getEntitiesWith(Position, Renderable);
+
+    // Sync meshes with entities
+    const currentEntityIds = new Set<string>();
+
+    for (const entity of entities) {
+      const pos = world.getComponent(entity, Position) as Position;
+      const renderable = world.getComponent(entity, Renderable) as Renderable;
+      const entityId = entity;
+      currentEntityIds.add(entityId);
+
+      let mesh = this.meshes.get(entityId);
+
+      if (!mesh) {
+        // Create new mesh
+        mesh = this.createMesh(renderable);
+        this.scene.add(mesh);
+        this.meshes.set(entityId, mesh);
+      }
+
+      // Update mesh position and rotation
+      mesh.position.set(pos.x, pos.y, pos.z);
+      mesh.rotation.y = pos.rotationY;
+    }
+
+    // Remove meshes for entities that no longer exist or no longer have Renderable/Position
+    for (const [entityId, mesh] of this.meshes.entries()) {
+      if (!currentEntityIds.has(entityId)) {
+        this.scene.remove(mesh);
+        this.meshes.delete(entityId);
+      }
+    }
+  }
+
+  private createMesh(renderable: Renderable): THREE.Mesh {
+    let geometry: THREE.BufferGeometry;
+    let material: THREE.Material;
+
+    switch (renderable.type) {
+      case RenderType.SPHERE:
+        geometry = new THREE.SphereGeometry(0.5, 32, 32);
+        break;
+      case RenderType.PLAYER:
+        geometry = new THREE.CapsuleGeometry(0.5, 1, 4, 8);
+        break;
+      case RenderType.BOX:
+      default:
+        geometry = new THREE.BoxGeometry(1, 1, 1);
+        break;
+    }
+
+    material = new THREE.MeshStandardMaterial({ color: renderable.color });
+    return new THREE.Mesh(geometry, material);
+  }
+}
+
+
+
+================================================================================
+FILE: ./client/src/index.ts
+================================================================================
+import * as THREE from 'three';
+import { io } from 'socket.io-client';
+import { 
+  World, Position, Velocity, Input, MovementSystem, InputState, 
+  Renderable, RenderType, CombatState, CombatSystem, ABILITIES, Stats,
+  Inventory, InventoryItem, NPC, NPCType, QuestState, QuestStatus, Quest
+} from 'shared';
+import { InputHandler } from './engine/InputHandler';
+import { RenderSystem } from './engine/RenderSystem';
+import { GameMap } from './engine/Map';
+import { UIManager } from './ui/UIManager';
+
+// Setup Three.js
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb); // Sky blue
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+// Lighting
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+scene.add(ambientLight);
+
+const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+directionalLight.position.set(10, 20, 10);
+directionalLight.castShadow = true;
+scene.add(directionalLight);
+
+// Map
+const gameMap = new GameMap(scene);
+
+// Setup ECS
+const world = new World();
+const movementSystem = new MovementSystem();
+const renderSystem = new RenderSystem(scene);
+const combatSystem = new CombatSystem();
+
+world.addSystem(movementSystem);
+world.addSystem(renderSystem);
+world.addSystem(combatSystem);
+
+// Local Player State
+let playerEntity: string | null = null;
+let playerCombatState: CombatState | null = null;
+const inputHandler = new InputHandler();
+let sequenceNumber = 0;
+const pendingInputs: { sequence: number; state: InputState; dt: number }[] = [];
+
+// Setup Network
+const socket = io(); // Se connecte à l'hôte actuel (Vite proxy s'occupe du reste)
+const uiManager = new UIManager(world, socket);
+
+socket.on('connect', () => {
+  console.log('Connected to server');
+});
+
+socket.on('WELCOME', (data: { entityId: string }) => {
+  playerEntity = data.entityId;
+  playerCombatState = new CombatState();
+  world.addComponent(playerEntity, playerCombatState);
+  world.addComponent(playerEntity, new Input());
+  world.addComponent(playerEntity, new Velocity());
+  console.log('My entity ID is:', playerEntity);
+});
+
+socket.on('SERVER_STATE', (data: { sequence: number; entities: any[] }) => {
+  if (!playerEntity) return;
+
+  const remoteEntityIds = new Set(data.entities.map(e => e.id));
+  
+  // Remove entities that no longer exist
+  const currentEntities = world.getEntitiesWith(Position);
+  for (const entityId of currentEntities) {
+    if (!remoteEntityIds.has(entityId) && entityId !== playerEntity) {
+      world.destroyEntity(entityId);
+    }
+  }
+
+  for (const entityData of data.entities) {
+    let pos = world.getComponent(entityData.id, Position) as Position;
+    let renderable = world.getComponent(entityData.id, Renderable) as Renderable;
+    let stats = world.getComponent(entityData.id, Stats) as Stats;
+    let npc = world.getComponent(entityData.id, NPC) as NPC;
+
+    if (!pos) {
+      pos = new Position();
+      world.addComponent(entityData.id, pos);
+    }
+    if (!renderable) {
+      renderable = new Renderable(entityData.type, entityData.color);
+      world.addComponent(entityData.id, renderable);
+    }
+    if (!stats) {
+      stats = new Stats();
+      world.addComponent(entityData.id, stats);
+    }
+    if (entityData.npcType && !npc) {
+      npc = new NPC(entityData.npcName, entityData.npcType);
+      world.addComponent(entityData.id, npc);
+    }
+
+    if (entityData.id === playerEntity) {
+      // Mise à jour des statistiques du joueur local dans l'UI
+      uiManager.updatePlayerStats(stats);
+
+      // --- RÉCONCILIATION SERVEUR ---
+      // 1. On remplace la position locale par la position officielle du serveur
+      pos.x = entityData.x;
+      pos.y = entityData.y;
+      pos.z = entityData.z;
+      pos.rotationY = entityData.rotationY;
+
+      // 2. On supprime de la liste des entrées en attente celles qui ont été traitées par le serveur
+      const index = pendingInputs.findIndex(i => i.sequence === data.sequence);
+      if (index !== -1) {
+        pendingInputs.splice(0, index + 1);
+      }
+
+      // 3. On "rejoue" toutes les entrées qui n'ont pas encore été confirmées par le serveur
+      // Cela permet d'éviter que le joueur ne soit téléporté en arrière à chaque mise à jour serveur
+      for (const input of pendingInputs) {
+        const playerInput = world.getComponent(playerEntity, Input);
+        if (playerInput) {
+          playerInput.state = input.state;
+          movementSystem.update(input.dt, world);
+        }
+      }
+    } else {
+      // Simple interpolation/snap for others
+      pos.x = entityData.x;
+      pos.y = entityData.y;
+      pos.z = entityData.z;
+      pos.rotationY = entityData.rotationY;
+    }
+    
+    stats.hp = entityData.hp;
+    stats.maxHp = entityData.maxHp;
+
+    // Update target UI if this is our target
+    if (playerCombatState && playerCombatState.targetId === entityData.id) {
+      uiManager.updateTarget(entityData.id);
+    }
+  }
+});
+
+socket.on('COMBAT_LOG', (data: { type: string, sourceId: string, targetId: string, abilityId: string, value: number }) => {
+  console.log(`Combat: ${data.sourceId} used ${data.abilityId} on ${data.targetId} for ${data.value} (${data.type})`);
+  const type = data.type === 'damage' ? 'damage' : (data.type === 'heal' ? 'heal' : 'info');
+  uiManager.addCombatLog(`${data.abilityId}: ${data.value}`, type);
+});
+
+socket.on('ENTITY_DIED', (data: { entityId: string }) => {
+  console.log(`Entity died: ${data.entityId}`);
+  uiManager.addCombatLog(`Entité morte: ${data.entityId}`, 'info');
+  if (playerCombatState && playerCombatState.targetId === data.entityId) {
+    playerCombatState.targetId = null;
+    uiManager.updateTarget(null);
+  }
+});
+
+socket.on('INVENTORY_UPDATE', (data: { items: InventoryItem[] }) => {
+  if (playerEntity) {
+    let inventory = world.getComponent(playerEntity, Inventory) as Inventory;
+    if (!inventory) {
+      inventory = new Inventory();
+      world.addComponent(playerEntity, inventory);
+    }
+    inventory.items = data.items;
+    uiManager.updateInventory(inventory);
+  }
+});
+
+socket.on('CHAT_MESSAGE', (data: { sender: string, text: string, isSystem?: boolean }) => {
+  uiManager.addChatMessage(data.sender, data.text, data.isSystem);
+});
+
+socket.on('NPC_DIALOGUE', (data: { name: string, text: string }) => {
+  console.log(`[${data.name}] ${data.text}`);
+  uiManager.addChatMessage(data.name, data.text);
+});
+
+socket.on('QUEST_OFFERED', (quest: Quest) => {
+  console.log('Quest Offered:', quest.title);
+  const accept = confirm(`Quête: ${quest.title}\n\n${quest.description}\n\nAccepter ?`);
+  if (accept) {
+    socket.emit('QUEST_ACCEPTED', { questId: quest.id });
+  }
+});
+
+socket.on('QUEST_UPDATE', (data: { activeQuests: Quest[], completedQuestIds: string[] }) => {
+  if (playerEntity) {
+    let qs = world.getComponent(playerEntity, QuestState) as QuestState;
+    if (!qs) {
+      qs = new QuestState();
+      world.addComponent(playerEntity, qs);
+    }
+    qs.activeQuests = data.activeQuests;
+    qs.completedQuestIds = data.completedQuestIds;
+  }
+});
+
+socket.on('QUEST_COMPLETED', (data: { questId: string }) => {
+  console.log('Quest Completed:', data.questId);
+  alert(`Quête terminée !`);
+});
+
+// Targeting Logic
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+window.addEventListener('mousedown', (event) => {
+  if (!playerEntity || !playerCombatState) return;
+
+  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+  
+  const meshes = Array.from(renderSystem.meshes.values());
+  const intersects = raycaster.intersectObjects(meshes);
+
+  if (intersects.length > 0) {
+    const clickedMesh = intersects[0].object;
+    for (const [entityId, mesh] of renderSystem.meshes.entries()) {
+      if (mesh === clickedMesh) {
+        if (entityId !== playerEntity) {
+          playerCombatState.targetId = entityId;
+          socket.emit('TARGET_CHANGED', { targetId: entityId });
+          uiManager.updateTarget(entityId);
+        }
+        break;
+      }
+    }
+  } else {
+    playerCombatState.targetId = null;
+    socket.emit('TARGET_CHANGED', { targetId: null });
+    uiManager.updateTarget(null);
+  }
+});
+
+inputHandler.onKeyPress('Tab', () => {
+  if (!playerEntity || !playerCombatState) return;
+
+  const allEntities = world.getEntitiesWith(Renderable);
+  const otherEntities = allEntities.filter(e => e !== playerEntity);
+  
+  if (otherEntities.length === 0) return;
+
+  let nextIndex = 0;
+  if (playerCombatState.targetId) {
+    const currentIndex = otherEntities.indexOf(playerCombatState.targetId);
+    nextIndex = (currentIndex + 1) % otherEntities.length;
+  }
+
+  playerCombatState.targetId = otherEntities[nextIndex];
+  socket.emit('TARGET_CHANGED', { targetId: playerCombatState.targetId });
+  uiManager.updateTarget(playerCombatState.targetId);
+  console.log('Target changed (Tab) to:', playerCombatState.targetId);
+});
+
+// Ability Usage
+inputHandler.onKeyPress('Digit1', () => useAbility('melee_attack'));
+inputHandler.onKeyPress('Digit2', () => useAbility('fireball'));
+inputHandler.onKeyPress('Digit3', () => useAbility('heal'));
+
+// Inventory Actions
+inputHandler.onKeyPress('KeyC', () => {
+  console.log('Requesting craft: craft_sword');
+  socket.emit('CRAFT_ITEM', { recipeId: 'craft_sword' });
+});
+
+inputHandler.onKeyPress('KeyP', () => {
+  console.log('Requesting use: potion');
+  socket.emit('USE_ITEM', { itemId: 'potion' });
+});
+
+inputHandler.onKeyPress('KeyX', () => {
+  console.log('Requesting drop: wood');
+  socket.emit('DROP_ITEM', { itemId: 'wood', quantity: 1 });
+});
+
+inputHandler.onKeyPress('KeyF', () => {
+  if (!playerEntity) return;
+  const playerPos = world.getComponent(playerEntity, Position);
+  if (!playerPos) return;
+
+  // Find nearest NPC
+  const npcs = world.getEntitiesWith(NPC, Position);
+  let closestNpc: string | null = null;
+  let minDistance = 3; // Interaction range
+
+  for (const npcId of npcs) {
+    const npcPos = world.getComponent(npcId, Position)!;
+    const dx = npcPos.x - playerPos.x;
+    const dz = npcPos.z - playerPos.z;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+
+    if (distance < minDistance) {
+      minDistance = distance;
+      closestNpc = npcId;
+    }
+  }
+
+  if (closestNpc) {
+    console.log('Interacting with NPC:', closestNpc);
+    socket.emit('INTERACT', { targetId: closestNpc });
+  }
+});
+
+function useAbility(abilityId: string) {
+  if (!playerCombatState) return;
+  socket.emit('USE_ABILITY', {
+    abilityId,
+    targetId: playerCombatState.targetId
+  });
+}
+
+// Camera settings
+const cameraOffset = new THREE.Vector3(0, 5, 10);
+
+// Game loop
+let lastTime = performance.now();
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  const currentTime = performance.now();
+  const dt = Math.min((currentTime - lastTime) / 1000, 0.1);
+  lastTime = currentTime;
+
+  if (playerEntity) {
+    const playerPos = world.getComponent(playerEntity, Position);
+    const playerInput = world.getComponent(playerEntity, Input);
+
+    if (playerPos && playerInput) {
+      // --- PRÉDICTION CLIENT ---
+      
+      // 1. Capturer les entrées clavier/souris
+      const currentInputState = inputHandler.getMovementState();
+      sequenceNumber++;
+
+      // 2. Stocker l'entrée pour la future réconciliation
+      playerInput.state = currentInputState;
+      playerInput.sequence = sequenceNumber;
+      pendingInputs.push({ sequence: sequenceNumber, state: { ...currentInputState }, dt });
+
+      // 3. Appliquer immédiatement le mouvement localement (Prédiction)
+      // On n'attend pas le serveur pour bouger le personnage
+      world.update(dt);
+
+      // 4. Envoyer l'entrée au serveur avec son numéro de séquence
+      socket.emit('PLAYER_INPUT', {
+        sequence: sequenceNumber,
+        state: currentInputState
+      });
+
+      // 5. Mise à jour de la caméra (Third Person)
+      const targetPosition = new THREE.Vector3(playerPos.x, playerPos.y, playerPos.z);
+      const relativeCameraOffset = cameraOffset.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), playerPos.rotationY);
+      const cameraPosition = targetPosition.clone().add(relativeCameraOffset);
+      
+      camera.position.lerp(cameraPosition, 0.1);
+      camera.lookAt(targetPosition);
+    }
+  } else {
+    // Still update world (for other entities) even if player not loaded
+    world.update(dt);
+  }
+
+  renderer.render(scene, camera);
+}
+
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+
+
+================================================================================
+FILE: ./client/src/ui/UIManager.ts
+================================================================================
+import { Stats, Inventory, InventoryItem, World, NPC, ITEMS } from 'shared';
+
+export class UIManager {
+    private world: World;
+    private socket: any;
+
+    // Elements
+    private playerHpBar: HTMLElement;
+    private playerHpText: HTMLElement;
+    private targetHud: HTMLElement;
+    private targetName: HTMLElement;
+    private targetHpBar: HTMLElement;
+    private targetHpText: HTMLElement;
+    private chatMessages: HTMLElement;
+    private chatInput: HTMLInputElement;
+    private combatLog: HTMLElement;
+    private inventoryWindow: HTMLElement;
+    private inventoryGrid: HTMLElement;
+
+    constructor(world: World, socket: any) {
+        this.world = world;
+        this.socket = socket;
+
+        // Initialize elements
+        this.playerHpBar = document.getElementById('player-hp-bar')!;
+        this.playerHpText = document.getElementById('player-hp-text')!;
+        this.targetHud = document.getElementById('target-hud')!;
+        this.targetName = document.getElementById('target-name')!;
+        this.targetHpBar = document.getElementById('target-hp-bar')!;
+        this.targetHpText = document.getElementById('target-hp-text')!;
+        this.chatMessages = document.getElementById('chat-messages')!;
+        this.chatInput = document.getElementById('chat-input') as HTMLInputElement;
+        this.combatLog = document.getElementById('combat-messages')!;
+        this.inventoryWindow = document.getElementById('inventory-window')!;
+        this.inventoryGrid = document.getElementById('inventory-grid')!;
+
+        this.setupEventListeners();
+    }
+
+    private setupEventListeners() {
+        // Chat input
+        this.chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const text = this.chatInput.value.trim();
+                if (text) {
+                    this.socket.emit('CHAT_MESSAGE', { text });
+                    this.chatInput.value = '';
+                }
+                this.chatInput.blur();
+            }
+        });
+
+        // Global key listeners for UI
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'i' || e.key === 'I') {
+                if (document.activeElement !== this.chatInput) {
+                    this.toggleInventory();
+                }
+            }
+            if (e.key === 'Enter') {
+                if (document.activeElement !== this.chatInput) {
+                    this.chatInput.focus();
+                }
+            }
+        });
+
+        // Close inventory
+        document.getElementById('close-inventory')?.addEventListener('click', () => {
+            this.toggleInventory(false);
+        });
+    }
+
+    public updatePlayerStats(stats: Stats) {
+        const hpPercent = (stats.hp / stats.maxHp) * 100;
+        this.playerHpBar.style.width = `${hpPercent}%`;
+        this.playerHpText.innerText = `HP: ${Math.ceil(stats.hp)}/${stats.maxHp}`;
+    }
+
+    public updateTarget(targetId: string | null) {
+        if (!targetId) {
+            this.targetHud.classList.add('hidden');
+            return;
+        }
+
+        const stats = this.world.getComponent(targetId, Stats) as Stats;
+        const npc = this.world.getComponent(targetId, NPC) as NPC;
+
+        if (stats) {
+            this.targetHud.classList.remove('hidden');
+            this.targetName.innerText = npc ? npc.name : `Joueur ${targetId.substring(0, 5)}`;
+            const hpPercent = (stats.hp / stats.maxHp) * 100;
+            this.targetHpBar.style.width = `${hpPercent}%`;
+            this.targetHpText.innerText = `${Math.ceil(stats.hp)}/${stats.maxHp}`;
+        } else {
+            this.targetHud.classList.add('hidden');
+        }
+    }
+
+    public addChatMessage(sender: string, text: string, isSystem: boolean = false) {
+        const msgDiv = document.createElement('div');
+        msgDiv.className = 'chat-message';
+        
+        if (isSystem) {
+            msgDiv.innerHTML = `<span class="system">${text}</span>`;
+        } else {
+            msgDiv.innerHTML = `<span class="sender">${sender}:</span> <span class="text">${text}</span>`;
+        }
+
+        this.chatMessages.appendChild(msgDiv);
+        this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+    }
+
+    public addCombatLog(text: string, type: 'damage' | 'heal' | 'info' = 'info') {
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `combat-msg ${type}`;
+        msgDiv.innerText = text;
+
+        this.combatLog.appendChild(msgDiv);
+        
+        // Keep only last 20 messages
+        while (this.combatLog.children.length > 20) {
+            this.combatLog.removeChild(this.combatLog.firstChild!);
+        }
+    }
+
+    public updateInventory(inventory: Inventory) {
+        this.inventoryGrid.innerHTML = '';
+        
+        // Create 20 slots
+        for (let i = 0; i < 20; i++) {
+            const slot = document.createElement('div');
+            slot.className = 'inventory-slot';
+            
+            const invItem = inventory.items[i];
+            if (invItem) {
+                const itemDef = ITEMS[invItem.itemId];
+                slot.innerHTML = `
+                    <div class="item-icon" style="background-color: ${this.getItemColor(invItem.itemId)}"></div>
+                    ${invItem.quantity > 1 ? `<div class="item-count">${invItem.quantity}</div>` : ''}
+                `;
+                slot.title = itemDef ? itemDef.name : invItem.itemId;
+                slot.onclick = () => this.socket.emit('USE_ITEM', { itemId: invItem.itemId });
+            }
+            
+            this.inventoryGrid.appendChild(slot);
+        }
+    }
+
+    private getItemColor(itemId: string): string {
+        if (itemId.includes('potion')) return '#e74c3c';
+        if (itemId.includes('sword')) return '#95a5a6';
+        if (itemId.includes('wood')) return '#d35400';
+        return '#7f8c8d';
+    }
+
+    public toggleInventory(force?: boolean) {
+        if (force !== undefined) {
+            if (force) this.inventoryWindow.classList.remove('hidden');
+            else this.inventoryWindow.classList.add('hidden');
+        } else {
+            this.inventoryWindow.classList.toggle('hidden');
+        }
+    }
+}
+
+
+
+================================================================================
+FILE: ./client/src/ui/style.css
+================================================================================
+/* UI Containers */
+.ui-container {
+    position: absolute;
+    pointer-events: none;
+    color: white;
+    text-shadow: 1px 1px 2px black;
+    user-select: none;
+}
+
+.ui-window {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.8);
+    border: 2px solid #444;
+    border-radius: 5px;
+    color: white;
+    pointer-events: all;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* Player HUD */
+#player-hud {
+    top: 20px;
+    left: 20px;
+    width: 300px;
+}
+
+.stats-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.bar-container {
+    position: relative;
+    width: 100%;
+    height: 20px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid #333;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.bar-fill {
+    height: 100%;
+    width: 100%;
+    transition: width 0.3s ease-out;
+}
+
+.hp .bar-fill { background: linear-gradient(to right, #c0392b, #e74c3c); }
+.mp .bar-fill { background: linear-gradient(to right, #2980b9, #3498db); }
+.stamina .bar-fill { background: linear-gradient(to right, #27ae60, #2ecc71); }
+
+.bar-container span {
+    position: absolute;
+    width: 100%;
+    text-align: center;
+    font-size: 12px;
+    line-height: 20px;
+    font-weight: bold;
+}
+
+/* Target HUD */
+#target-hud {
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 250px;
+    text-align: center;
+}
+
+#target-name {
+    font-size: 18px;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+.bar-container.small {
+    height: 15px;
+}
+
+.bar-container.small span {
+    line-height: 15px;
+    font-size: 10px;
+}
+
+/* Chat */
+#chat-container {
+    bottom: 150px;
+    left: 20px;
+    width: 400px;
+    height: 200px;
+    background: rgba(0, 0, 0, 0.3);
+    display: flex;
+    flex-direction: column;
+    pointer-events: all;
+}
+
+#chat-messages {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 5px;
+    font-size: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.chat-message {
+    word-wrap: break-word;
+}
+
+.chat-message .sender { font-weight: bold; color: #f1c40f; }
+.chat-message .system { color: #95a5a6; font-style: italic; }
+
+.chat-input-container {
+    padding: 5px;
+}
+
+#chat-input {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid #555;
+    color: white;
+    padding: 5px;
+    box-sizing: border-box;
+}
+
+/* Combat Log */
+#combat-log {
+    bottom: 150px;
+    right: 20px;
+    width: 300px;
+    height: 150px;
+    background: rgba(0, 0, 0, 0.2);
+    font-size: 12px;
+    overflow-y: hidden;
+    display: flex;
+    flex-direction: column-reverse;
+    padding: 5px;
+}
+
+.combat-msg { margin-bottom: 2px; }
+.combat-msg.damage { color: #e74c3c; }
+.combat-msg.heal { color: #2ecc71; }
+.combat-msg.info { color: #3498db; }
+
+/* Inventory Window */
+#inventory-window {
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 350px;
+    min-height: 400px;
+    display: flex;
+    flex-direction: column;
+}
+
+.window-header {
+    padding: 10px;
+    background: #222;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #444;
+}
+
+.close-btn {
+    background: #c0392b;
+    border: none;
+    color: white;
+    cursor: pointer;
+    padding: 2px 8px;
+}
+
+.grid-container {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    padding: 15px;
+    overflow-y: auto;
+}
+
+.inventory-slot {
+    width: 50px;
+    height: 50px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid #555;
+    position: relative;
+    cursor: pointer;
+}
+
+.inventory-slot:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.inventory-slot .item-icon {
+    width: 100%;
+    height: 100%;
+    background-size: contain;
+}
+
+.inventory-slot .item-count {
+    position: absolute;
+    bottom: 2px;
+    right: 2px;
+    font-size: 10px;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 0 2px;
+}
+
+/* Action Bar */
+#action-bar {
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 10px;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 10px;
+    border-radius: 5px;
+    pointer-events: all;
+}
+
+.action-slot {
+    width: 50px;
+    height: 50px;
+    background: #333;
+    border: 2px solid #555;
+    position: relative;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.action-slot:hover {
+    border-color: #f1c40f;
+}
+
+.key-bind {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    font-size: 10px;
+    color: #aaa;
+}
+
+.icon {
+    width: 32px;
+    height: 32px;
+    background-color: #555;
+    border-radius: 4px;
+}
+
+.icon.melee { background-color: #95a5a6; }
+.icon.fireball { background-color: #e67e22; }
+.icon.heal { background-color: #2ecc71; }
+.icon.craft { background-color: #9b59b6; }
+
+
+
+================================================================================
+FILE: ./client/tsconfig.json
+================================================================================
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "types": ["vite/client"]
+  },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../shared" }
+  ]
+}
+
+
+
+================================================================================
+FILE: ./client/vite.config.ts
+================================================================================
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  server: {
+    port: 5173,
+    host: '0.0.0.0',
+    proxy: {
+      '/socket.io': {
+        target: 'http://localhost:3000',
+        ws: true,
+      },
+    },
+  },
+});
+
+
+
+================================================================================
+FILE: ./package.json
+================================================================================
+{
+  "name": "daoc-clone",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server",
+    "shared"
+  ],
+  "scripts": {
+    "predev": "fuser -k 3000/tcp 5173/tcp || true",
+    "client:dev": "npm run dev -w client",
+    "server:dev": "npm run dev -w server",
+    "dev": "concurrently \"npm run server:dev\" \"npm run client:dev\"",
+    "build": "npm run build -w shared && npm run build -w server && npm run build -w client"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "typescript": "^5.3.3"
+  }
+}
+
+
+
+================================================================================
+FILE: ./server/package.json
+================================================================================
+{
+  "name": "server",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "ts-node-dev --respawn src/index.ts",
+    "start": "ts-node src/index.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "shared": "*",
+    "socket.io": "^4.7.4",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.19",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0"
+  }
+}
+
+
+
+================================================================================
+FILE: ./server/src/game/AISystem.ts
+================================================================================
+import { System } from '../../../shared/src/ecs/System';
+import { World } from '../../../shared/src/ecs/World';
+import { Position } from '../../../shared/src/components/Position';
+import { Velocity } from '../../../shared/src/components/Velocity';
+import { NPC, NPCType } from '../../../shared/src/components/NPC';
+import { Input } from '../../../shared/src/components/Input';
+import { CombatState } from '../../../shared/src/components/CombatState';
+
+export class AISystem extends System {
+  private readonly DETECTION_RANGE = 10;
+  private readonly ATTACK_RANGE = 2;
+  private readonly MOVE_SPEED = 3;
+
+  public update(dt: number, world: World): void {
+    const npcs = world.getEntitiesWith(NPC, Position, Velocity);
+    const players = world.getEntitiesWith(Input, Position);
+
+    for (const npcEntity of npcs) {
+      const npc = world.getComponent(npcEntity, NPC)!;
+      const pos = world.getComponent(npcEntity, Position)!;
+      const vel = world.getComponent(npcEntity, Velocity)!;
+
+      if (npc.npcType === NPCType.ENEMY) {
+        this.updateEnemyAI(npcEntity, pos, vel, players, world);
+      } else {
+        // Optionnel: mouvement aléatoire pour les PNJs non-ennemis
+        this.updatePassiveAI(vel);
+      }
+    }
+  }
+
+  private updateEnemyAI(
+    entity: string,
+    pos: Position,
+    vel: Velocity,
+    players: string[],
+    world: World
+  ): void {
+    let closestPlayer: string | null = null;
+    let minDistance = this.DETECTION_RANGE;
+
+    for (const playerEntity of players) {
+      const playerPos = world.getComponent(playerEntity, Position)!;
+      const dx = playerPos.x - pos.x;
+      const dz = playerPos.z - pos.z;
+      const distance = Math.sqrt(dx * dx + dz * dz);
+
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestPlayer = playerEntity;
+      }
+    }
+
+    if (closestPlayer) {
+      const playerPos = world.getComponent(closestPlayer, Position)!;
+      const dx = playerPos.x - pos.x;
+      const dz = playerPos.z - pos.z;
+      
+      if (minDistance > this.ATTACK_RANGE) {
+        // Move towards player
+        const length = Math.sqrt(dx * dx + dz * dz);
+        vel.vx = (dx / length) * this.MOVE_SPEED;
+        vel.vz = (dz / length) * this.MOVE_SPEED;
+        pos.rotationY = Math.atan2(dx, dz);
+      } else {
+        // Attack player
+        vel.vx = 0;
+        vel.vz = 0;
+        
+        let combatState = world.getComponent(entity, CombatState);
+        if (!combatState) {
+          combatState = new CombatState();
+          world.addComponent(entity, combatState);
+        }
+        combatState.targetId = closestPlayer;
+      }
+    } else {
+      vel.vx = 0;
+      vel.vz = 0;
+    }
+  }
+
+  private updatePassiveAI(vel: Velocity): void {
+    // Simple wandering could be added here
+    // For now, just stay still or keep current velocity if we want them to move
+  }
+}
+
+
+
+================================================================================
+FILE: ./server/src/game/QuestSystem.ts
+================================================================================
+import { World } from '../../../shared/src/ecs/World';
+import { QuestState } from '../../../shared/src/components/QuestState';
+import { Quest, QuestStatus, QuestObjectiveType } from '../../../shared/src/types/Quests';
+import { Inventory } from '../../../shared/src/components/Inventory';
+import { InventorySystem } from '../../../shared/src/systems/InventorySystem';
+
+export class QuestSystem {
+  constructor(private inventorySystem: InventorySystem) {}
+
+  public acceptQuest(playerEntity: string, quest: Quest, world: World): boolean {
+    const questState = world.getComponent(playerEntity, QuestState);
+    if (!questState) return false;
+
+    // Check if already active or completed
+    if (questState.activeQuests.find(q => q.id === quest.id) || 
+        questState.completedQuestIds.includes(quest.id)) {
+      return false;
+    }
+
+    const newQuest = { ...quest, status: QuestStatus.ACTIVE };
+    questState.activeQuests.push(newQuest);
+    return true;
+  }
+
+  public updateProgress(playerEntity: string, type: QuestObjectiveType, targetId: string, amount: number, world: World): void {
+    const questState = world.getComponent(playerEntity, QuestState);
+    if (!questState) return;
+
+    for (const quest of questState.activeQuests) {
+      let changed = false;
+      for (const objective of quest.objectives) {
+        if (objective.type === type && objective.targetId === targetId) {
+          objective.currentAmount = Math.min(objective.requiredAmount, objective.currentAmount + amount);
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        this.checkQuestCompletion(playerEntity, quest, world);
+      }
+    }
+  }
+
+  private checkQuestCompletion(playerEntity: string, quest: Quest, world: World): void {
+    const allCompleted = quest.objectives.every(obj => obj.currentAmount >= obj.requiredAmount);
+    if (allCompleted && quest.status !== QuestStatus.COMPLETED) {
+      quest.status = QuestStatus.COMPLETED;
+      // Notify player (handled via socket in index.ts)
+    }
+  }
+
+  public completeQuest(playerEntity: string, questId: string, world: World): boolean {
+    const questState = world.getComponent(playerEntity, QuestState);
+    if (!questState) return false;
+
+    const questIndex = questState.activeQuests.findIndex(q => q.id === questId);
+    if (questIndex === -1) return false;
+
+    const quest = questState.activeQuests[questIndex];
+    if (quest.status !== QuestStatus.COMPLETED) return false;
+
+    // Give rewards
+    if (quest.rewards.items) {
+      for (const item of quest.rewards.items) {
+        this.inventorySystem.addItem(playerEntity, item.itemId, item.amount, world);
+      }
+    }
+    // Exp and Gold could be added here if Stats component supported them
+
+    questState.completedQuestIds.push(questId);
+    questState.activeQuests.splice(questIndex, 1);
+    return true;
+  }
+}
+
+
+
+================================================================================
+FILE: ./server/src/index.ts
+================================================================================
+import express from 'express';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
+import { 
+  World, Position, Velocity, Input, MovementSystem, InputState,
+  Stats, CombatState, CombatSystem, CombatEvent, Renderable, RenderType,
+  Inventory, InventorySystem, NPC, NPCType, QuestState, QuestStatus,
+  QuestObjectiveType, Quest, RECIPES
+} from 'shared';
+import { AISystem } from './game/AISystem';
+import { QuestSystem } from './game/QuestSystem';
+
+const app = express();
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: '*',
+  }
+});
+
+const world = new World();
+const movementSystem = new MovementSystem();
+const inventorySystem = new InventorySystem();
+const aiSystem = new AISystem();
+const questSystem = new QuestSystem(inventorySystem);
+
+// Sample Quest
+const woodQuest: Quest = {
+  id: 'wood_quest',
+  title: 'Collecter du bois',
+  description: 'Apportez 5 unités de bois au garde.',
+  objectives: [
+    {
+      type: QuestObjectiveType.COLLECT,
+      targetId: 'wood',
+      requiredAmount: 5,
+      currentAmount: 0,
+      description: 'Bois collecté'
+    }
+  ],
+  rewards: {
+    items: [{ itemId: 'iron', amount: 2 }]
+  },
+  status: QuestStatus.AVAILABLE
+};
+
+const combatSystem = new CombatSystem((event: CombatEvent) => {
+  io.emit('COMBAT_LOG', event);
+  
+  if (event.type === 'death') {
+    io.emit('ENTITY_DIED', { entityId: event.targetId });
+    console.log(`Entity ${event.targetId} died!`);
+
+    // Update quest progress for all players if the target was an enemy
+    const targetNpc = world.getComponent(event.targetId, NPC);
+    if (targetNpc && targetNpc.npcType === NPCType.ENEMY) {
+      for (const playerEntity of playerEntities.values()) {
+        questSystem.updateProgress(playerEntity, QuestObjectiveType.KILL, 'enemy', 1, world);
+        // Sync quest state
+        const qs = world.getComponent(playerEntity, QuestState);
+        const socketId = Array.from(playerEntities.entries()).find(([_, id]) => id === playerEntity)?.[0];
+        if (qs && socketId) {
+          io.to(socketId).emit('QUEST_UPDATE', { activeQuests: qs.activeQuests, completedQuestIds: qs.completedQuestIds });
+        }
+      }
+    }
+
+    // Simple respawn logic
+    const stats = world.getComponent(event.targetId, Stats);
+    const pos = world.getComponent(event.targetId, Position);
+    if (stats && pos) {
+      stats.hp = stats.maxHp;
+      pos.x = 0;
+      pos.z = 0;
+    }
+  }
+});
+
+world.addSystem(movementSystem);
+world.addSystem(aiSystem);
+world.addSystem(combatSystem);
+world.addSystem(inventorySystem);
+
+// Create a Quest Giver NPC
+const questGiver = world.createEntity();
+world.addComponent(questGiver, new Position(5, 0, 5));
+world.addComponent(questGiver, new Velocity());
+world.addComponent(questGiver, new NPC('Garde Forestier', NPCType.QUEST_GIVER));
+world.addComponent(questGiver, new Renderable(RenderType.PLAYER, 0x0000ff)); // Blue for NPC
+world.addComponent(questGiver, new Stats(1000, 1000));
+
+// Create some Enemies
+for (let i = 0; i < 3; i++) {
+  const enemy = world.createEntity();
+  world.addComponent(enemy, new Position(Math.random() * 20 - 10, 0, Math.random() * 20 - 10));
+  world.addComponent(enemy, new Velocity());
+  world.addComponent(enemy, new NPC(`Loup ${i + 1}`, NPCType.ENEMY));
+  world.addComponent(enemy, new Renderable(RenderType.PLAYER, 0xff0000)); // Red for Enemy
+  world.addComponent(enemy, new Stats(50, 50));
+  world.addComponent(enemy, new CombatState());
+}
+
+// Map pour stocker les entités par socket
+const playerEntities = new Map<string, string>();
+// Map pour stocker le dernier numéro de séquence traité par joueur
+const lastProcessedSequence = new Map<string, number>();
+
+io.on('connection', (socket) => {
+  console.log('A user connected:', socket.id);
+
+  // Create an entity for the player
+  const playerEntity = world.createEntity();
+  playerEntities.set(socket.id, playerEntity);
+  lastProcessedSequence.set(socket.id, 0);
+
+  world.addComponent(playerEntity, new Position());
+  world.addComponent(playerEntity, new Velocity());
+  world.addComponent(playerEntity, new Input());
+  world.addComponent(playerEntity, new Stats());
+  world.addComponent(playerEntity, new CombatState());
+  world.addComponent(playerEntity, new Inventory());
+  world.addComponent(playerEntity, new QuestState());
+  world.addComponent(playerEntity, new Renderable(RenderType.PLAYER, 0x00ff00));
+
+  // Add some starting items for testing
+  inventorySystem.addItem(playerEntity, 'wood', 5, world);
+  inventorySystem.addItem(playerEntity, 'iron', 2, world);
+
+  console.log(`Created entity ${playerEntity} for player ${socket.id}`);
+  socket.emit('WELCOME', { entityId: playerEntity });
+
+  // Initial inventory sync
+  const inv = world.getComponent(playerEntity, Inventory) as Inventory;
+  if (inv) {
+    socket.emit('INVENTORY_UPDATE', { items: inv.items });
+  }
+
+  socket.on('disconnect', () => {
+    console.log('User disconnected:', socket.id);
+    world.destroyEntity(playerEntity);
+    playerEntities.delete(socket.id);
+    lastProcessedSequence.delete(socket.id);
+  });
+
+  socket.on('PLAYER_INPUT', (data: { sequence: number; state: InputState }) => {
+    const entity = playerEntities.get(socket.id);
+    if (entity) {
+      const input = world.getComponent(entity, Input);
+      if (input) {
+        input.state = data.state;
+        input.sequence = data.sequence;
+        lastProcessedSequence.set(socket.id, data.sequence);
+      }
+    }
+  });
+
+  socket.on('TARGET_CHANGED', (data: { targetId: string | null }) => {
+    const entity = playerEntities.get(socket.id);
+    if (entity) {
+      const combatState = world.getComponent(entity, CombatState);
+      if (combatState) {
+        combatState.targetId = data.targetId;
+      }
+    }
+  });
+
+  socket.on('USE_ABILITY', (data: { abilityId: string, targetId: string | null }) => {
+    const entity = playerEntities.get(socket.id);
+    if (entity) {
+      combatSystem.useAbility(entity, data.abilityId, data.targetId, world);
+    }
+  });
+
+  socket.on('CRAFT_ITEM', (data: { recipeId: string }) => {
+    const entity = playerEntities.get(socket.id);
+    if (entity) {
+      const success = inventorySystem.craftItem(entity, data.recipeId, world);
+      if (success) {
+        const inv = world.getComponent(entity, Inventory) as Inventory;
+        if (inv) {
+          socket.emit('INVENTORY_UPDATE', { items: inv.items });
+          // Update quest progress for collection quests
+          const recipe = RECIPES.find(r => r.id === data.recipeId);
+          if (recipe) {
+            questSystem.updateProgress(entity, QuestObjectiveType.COLLECT, recipe.result.itemId, recipe.result.quantity, world);
+            const qs = world.getComponent(entity, QuestState);
+            if (qs) socket.emit('QUEST_UPDATE', { activeQuests: qs.activeQuests, completedQuestIds: qs.completedQuestIds });
+          }
+        }
+      }
+    }
+  });
+
+  socket.on('DROP_ITEM', (data: { itemId: string, quantity: number }) => {
+    const entity = playerEntities.get(socket.id);
+    if (entity) {
+      const success = inventorySystem.removeItem(entity, data.itemId, data.quantity, world);
+      if (success) {
+        const inv = world.getComponent(entity, Inventory) as Inventory;
+        if (inv) {
+          socket.emit('INVENTORY_UPDATE', { items: inv.items });
+        }
+      }
+    }
+  });
+
+  socket.on('USE_ITEM', (data: { itemId: string }) => {
+    const entity = playerEntities.get(socket.id);
+    if (entity) {
+      // Logique d'utilisation d'objet (ex: potion)
+      if (data.itemId === 'potion') {
+        const stats = world.getComponent(entity, Stats) as Stats;
+        if (stats && stats.hp < stats.maxHp) {
+          if (inventorySystem.removeItem(entity, 'potion', 1, world)) {
+            stats.hp = Math.min(stats.maxHp, stats.hp + 20);
+            const inv = world.getComponent(entity, Inventory) as Inventory;
+            if (inv) {
+              socket.emit('INVENTORY_UPDATE', { items: inv.items });
+            }
+          }
+        }
+      }
+    }
+  });
+
+  socket.on('INTERACT', (data: { targetId: string }) => {
+    const entity = playerEntities.get(socket.id);
+    if (!entity) return;
+
+    const targetNpc = world.getComponent(data.targetId, NPC);
+    if (targetNpc) {
+      console.log(`Player ${entity} interacting with NPC ${targetNpc.name}`);
+      
+      if (targetNpc.npcType === NPCType.QUEST_GIVER) {
+        // Check if player has the quest
+        const qs = world.getComponent(entity, QuestState);
+        if (qs) {
+          const activeQuest = qs.activeQuests.find(q => q.id === woodQuest.id);
+          if (activeQuest) {
+            if (activeQuest.status === QuestStatus.COMPLETED) {
+              // Complete quest
+              if (questSystem.completeQuest(entity, woodQuest.id, world)) {
+                socket.emit('QUEST_COMPLETED', { questId: woodQuest.id });
+                socket.emit('QUEST_UPDATE', { activeQuests: qs.activeQuests, completedQuestIds: qs.completedQuestIds });
+                // Sync inventory because of rewards
+                const inv = world.getComponent(entity, Inventory) as Inventory;
+                if (inv) socket.emit('INVENTORY_UPDATE', { items: inv.items });
+              }
+            } else {
+              socket.emit('NPC_DIALOGUE', { name: targetNpc.name, text: "Comment avance votre quête ?" });
+            }
+          } else if (!qs.completedQuestIds.includes(woodQuest.id)) {
+            // Offer quest
+            socket.emit('QUEST_OFFERED', woodQuest);
+          } else {
+            socket.emit('NPC_DIALOGUE', { name: targetNpc.name, text: "Merci encore pour votre aide !" });
+          }
+        }
+      } else if (targetNpc.npcType === NPCType.MERCHANT) {
+        socket.emit('NPC_DIALOGUE', { name: targetNpc.name, text: "Voulez-vous commercer ?" });
+      }
+    }
+  });
+
+  socket.on('QUEST_ACCEPTED', (data: { questId: string }) => {
+    const entity = playerEntities.get(socket.id);
+    if (entity && data.questId === woodQuest.id) {
+      if (questSystem.acceptQuest(entity, woodQuest, world)) {
+        const qs = world.getComponent(entity, QuestState);
+        if (qs) {
+          socket.emit('QUEST_UPDATE', { activeQuests: qs.activeQuests, completedQuestIds: qs.completedQuestIds });
+          
+          // Check if player already has the items
+          const inv = world.getComponent(entity, Inventory) as Inventory;
+          if (inv) {
+            const woodItem = inv.items.find(i => i.itemId === 'wood');
+            if (woodItem) {
+              questSystem.updateProgress(entity, QuestObjectiveType.COLLECT, 'wood', woodItem.quantity, world);
+              socket.emit('QUEST_UPDATE', { activeQuests: qs.activeQuests, completedQuestIds: qs.completedQuestIds });
+            }
+          }
+        }
+      }
+    }
+  });
+});
+
+const PORT = process.env.PORT || 3000;
+httpServer.listen(Number(PORT), '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT} (0.0.0.0)`);
+});
+
+// Game loop
+let lastTime = Date.now();
+setInterval(() => {
+  const now = Date.now();
+  const dt = (now - lastTime) / 1000;
+  lastTime = now;
+
+  world.update(dt);
+
+  // Prepare world state
+  const allEntities = world.getEntitiesWith(Position, Renderable);
+  const worldState = allEntities.map(entity => {
+    const pos = world.getComponent(entity, Position) as Position;
+    const renderable = world.getComponent(entity, Renderable) as Renderable;
+    const stats = world.getComponent(entity, Stats) as Stats;
+    const npc = world.getComponent(entity, NPC) as NPC;
+    return {
+      id: entity,
+      x: pos.x,
+      y: pos.y,
+      z: pos.z,
+      rotationY: pos.rotationY,
+      type: renderable.type,
+      color: renderable.color,
+      hp: stats?.hp,
+      maxHp: stats?.maxHp,
+      npcType: npc?.npcType,
+      npcName: npc?.name
+    };
+  });
+
+  // Broadcast player states to each client
+  for (const [socketId, entity] of playerEntities.entries()) {
+    const sequence = lastProcessedSequence.get(socketId) || 0;
+    
+    io.to(socketId).emit('SERVER_STATE', {
+      sequence: sequence,
+      entities: worldState
+    });
+  }
+}, 1000 / 20);
+
+// Basic Regeneration
+setInterval(() => {
+  const entities = world.getEntitiesWith(Stats);
+  for (const entity of entities) {
+    const stats = world.getComponent(entity, Stats) as Stats;
+    if (stats && stats.hp > 0) {
+      stats.hp = Math.min(stats.maxHp, stats.hp + 1);
+      stats.mana = Math.min(stats.maxMana, stats.mana + 2);
+      stats.stamina = Math.min(stats.stamina, stats.stamina + 5);
+    }
+  }
+}, 2000);
+
+
+
+================================================================================
+FILE: ./server/tsconfig.json
+================================================================================
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "module": "CommonJS"
+  },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../shared" }
+  ]
+}
+
+
+
+================================================================================
+FILE: ./shared/package.json
+================================================================================
+{
+  "name": "shared",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "typescript": "^5.3.3"
+  }
+}
+
+
+
+================================================================================
+FILE: ./shared/src/components/CombatState.ts
+================================================================================
+import { Component } from '../ecs/Component';
+
+export interface CastingInfo {
+  abilityId: string;
+  remainingTime: number;
+  totalTime: number;
+  targetId: string | null;
+}
+
+export class CombatState implements Component {
+  public static readonly TYPE = 'CombatState';
+  public readonly _type = CombatState.TYPE;
+
+  public targetId: string | null = null;
+  public cooldowns: Map<string, number> = new Map();
+  public casting: CastingInfo | null = null;
+
+  constructor() {}
+}
+
+
+
+================================================================================
+FILE: ./shared/src/components/Input.ts
+================================================================================
+import { Component } from '../ecs/Component';
+
+export interface InputState {
+  up: boolean;
+  down: boolean;
+  left: boolean;
+  right: boolean;
+  jump: boolean;
+}
+
+export class Input implements Component {
+  public static readonly TYPE = 'Input';
+  public readonly _type = Input.TYPE;
+
+  public sequence: number = 0;
+  public state: InputState = {
+    up: false,
+    down: false,
+    left: false,
+    right: false,
+    jump: false
+  };
+
+  constructor() {}
+}
+
+
+
+================================================================================
+FILE: ./shared/src/components/Inventory.ts
+================================================================================
+import { Component } from '../ecs/Component';
+import { InventoryItem } from '../types/Items';
+
+export class Inventory implements Component {
+    public static readonly TYPE = 'Inventory';
+    public readonly _type = Inventory.TYPE;
+
+    public items: InventoryItem[] = [];
+    public maxSize: number = 20;
+
+    constructor(maxSize: number = 20) {
+        this.maxSize = maxSize;
+    }
+}
+
+
+
+================================================================================
+FILE: ./shared/src/components/NPC.ts
+================================================================================
+import { Component } from '../ecs/Component';
+
+export enum NPCType {
+  MERCHANT = 'Merchant',
+  QUEST_GIVER = 'QuestGiver',
+  ENEMY = 'Enemy'
+}
+
+export class NPC implements Component {
+  public static readonly TYPE = 'NPC';
+  public readonly _type = NPC.TYPE;
+
+  constructor(
+    public name: string,
+    public npcType: NPCType,
+    public dialogue: string[] = []
+  ) {}
+}
+
+
+
+================================================================================
+FILE: ./shared/src/components/Position.ts
+================================================================================
+import { Component } from '../ecs/Component';
+
+export class Position implements Component {
+  public static readonly TYPE = 'Position';
+  public readonly _type = Position.TYPE;
+
+  constructor(
+    public x: number = 0,
+    public y: number = 0,
+    public z: number = 0,
+    public rotationY: number = 0
+  ) {}
+}
+
+
+
+================================================================================
+FILE: ./shared/src/components/QuestState.ts
+================================================================================
+import { Component } from '../ecs/Component';
+import { Quest } from '../types/Quests';
+
+export class QuestState implements Component {
+  public static readonly TYPE = 'QuestState';
+  public readonly _type = QuestState.TYPE;
+
+  constructor(
+    public activeQuests: Quest[] = [],
+    public completedQuestIds: string[] = []
+  ) {}
+}
+
+
+
+================================================================================
+FILE: ./shared/src/components/Renderable.ts
+================================================================================
+import { Component } from '../ecs/Component';
+
+export enum RenderType {
+  BOX,
+  SPHERE,
+  PLAYER
+}
+
+export class Renderable implements Component {
+  public static readonly TYPE = 'Renderable';
+  public readonly _type = Renderable.TYPE;
+
+  constructor(
+    public type: RenderType = RenderType.BOX,
+    public color: number = 0xffffff
+  ) {}
+}
+
+
+
+================================================================================
+FILE: ./shared/src/components/Stats.ts
+================================================================================
+import { Component } from '../ecs/Component';
+
+export class Stats implements Component {
+  public static readonly TYPE = 'Stats';
+  public readonly _type = Stats.TYPE;
+
+  constructor(
+    public hp: number = 100,
+    public maxHp: number = 100,
+    public mana: number = 100,
+    public maxMana: number = 100,
+    public stamina: number = 100,
+    public level: number = 1
+  ) {}
+}
+
+
+
+================================================================================
+FILE: ./shared/src/components/Velocity.ts
+================================================================================
+import { Component } from '../ecs/Component';
+
+export class Velocity implements Component {
+  public static readonly TYPE = 'Velocity';
+  public readonly _type = Velocity.TYPE;
+
+  constructor(
+    public vx: number = 0,
+    public vy: number = 0,
+    public vz: number = 0
+  ) {}
+}
+
+
+
+================================================================================
+FILE: ./shared/src/components/index.ts
+================================================================================
+export * from './Position';
+export * from './Velocity';
+export * from './Stats';
+export * from './Input';
+export * from './Renderable';
+export * from './CombatState';
+export * from './Inventory';
+export * from './NPC';
+export * from './QuestState';
+
+
+
+================================================================================
+FILE: ./shared/src/constants/MapData.ts
+================================================================================
+export interface Obstacle {
+  x: number;
+  y: number;
+  z: number;
+  w: number;
+  h: number;
+  d: number;
+  color: number;
+}
+
+export const MAP_OBSTACLES: Obstacle[] = [
+  { x: 5, y: 1, z: 5, w: 2, h: 2, d: 2, color: 0x884444 },
+  { x: -10, y: 1, z: -10, w: 4, h: 2, d: 4, color: 0x448844 },
+  { x: 15, y: 1, z: -5, w: 2, h: 5, d: 2, color: 0x444488 },
+  { x: -5, y: 0.5, z: 15, w: 10, h: 1, d: 2, color: 0x888844 },
+];
+
+
+
+================================================================================
+FILE: ./shared/src/ecs/Component.ts
+================================================================================
+export interface Component {
+  readonly _type: string;
+}
+
+export type ComponentConstructor<T extends Component> = new (...args: any[]) => T;
+
+
+
+================================================================================
+FILE: ./shared/src/ecs/Entity.ts
+================================================================================
+export type Entity = string;
+
+
+
+================================================================================
+FILE: ./shared/src/ecs/System.ts
+================================================================================
+import { World } from './World';
+
+export abstract class System {
+  public abstract update(dt: number, world: World): void;
+}
+
+
+
+================================================================================
+FILE: ./shared/src/ecs/World.ts
+================================================================================
+import { Entity } from './Entity';
+import { Component, ComponentConstructor } from './Component';
+import { System } from './System';
+
+export class World {
+  private entities: Set<Entity> = new Set();
+  private components: Map<string, Map<Entity, Component>> = new Map();
+  private systems: System[] = [];
+  private nextEntityId: number = 0;
+
+  public createEntity(): Entity {
+    const entity = (this.nextEntityId++).toString();
+    this.entities.add(entity);
+    return entity;
+  }
+
+  public destroyEntity(entity: Entity): void {
+    this.entities.delete(entity);
+    for (const componentMap of this.components.values()) {
+      componentMap.delete(entity);
+    }
+  }
+
+  public addComponent<T extends Component>(entity: Entity, component: T): void {
+    const type = component._type;
+    if (!this.components.has(type)) {
+      this.components.set(type, new Map());
+    }
+    this.components.get(type)!.set(entity, component);
+  }
+
+  public getComponent<T extends Component>(entity: Entity, constructor: ComponentConstructor<T>): T | undefined {
+    const type = (constructor as any).TYPE;
+    const componentMap = this.components.get(type);
+    return componentMap ? (componentMap.get(entity) as T) : undefined;
+  }
+
+  public removeComponent<T extends Component>(entity: Entity, constructor: ComponentConstructor<T>): void {
+    const type = (constructor as any).TYPE;
+    this.components.get(type)?.delete(entity);
+  }
+
+  public hasComponent<T extends Component>(entity: Entity, constructor: ComponentConstructor<T>): boolean {
+    const type = (constructor as any).TYPE;
+    return this.components.get(type)?.has(entity) ?? false;
+  }
+
+  public addSystem(system: System): void {
+    this.systems.push(system);
+  }
+
+  public update(dt: number): void {
+    for (const system of this.systems) {
+      system.update(dt, this);
+    }
+  }
+
+  public getEntitiesWith(...constructors: ComponentConstructor<any>[]): Entity[] {
+    if (constructors.length === 0) return Array.from(this.entities);
+
+    const types = constructors.map(c => (c as any).TYPE);
+    const firstType = types[0];
+    const firstMap = this.components.get(firstType);
+    
+    if (!firstMap) return [];
+
+    const result: Entity[] = [];
+    for (const entity of firstMap.keys()) {
+      let hasAll = true;
+      for (let i = 1; i < types.length; i++) {
+        if (!this.components.get(types[i])?.has(entity)) {
+          hasAll = false;
+          break;
+        }
+      }
+      if (hasAll) {
+        result.push(entity);
+      }
+    }
+    return result;
+  }
+}
+
+
+
+================================================================================
+FILE: ./shared/src/ecs/index.ts
+================================================================================
+export * from './Entity';
+export * from './Component';
+export * from './System';
+export * from './World';
+
+
+
+================================================================================
+FILE: ./shared/src/index.ts
+================================================================================
+export * from './ecs';
+export * from './components';
+export * from './systems';
+export * from './constants/MapData';
+export * from './types/Abilities';
+export * from './types/Items';
+export * from './types/Quests';
+
+
+
+================================================================================
+FILE: ./shared/src/systems/CombatSystem.ts
+================================================================================
+import { System } from '../ecs/System';
+import { World } from '../ecs/World';
+import { CombatState } from '../components/CombatState';
+import { Stats } from '../components/Stats';
+import { ABILITIES, AbilityType } from '../types/Abilities';
+
+export interface CombatEvent {
+  type: 'damage' | 'heal' | 'death';
+  sourceId: string;
+  targetId: string;
+  abilityId: string;
+  value: number;
+}
+
+export type CombatCallback = (event: CombatEvent) => void;
+
+export class CombatSystem extends System {
+  private onCombatEvent: CombatCallback | null = null;
+
+  constructor(onCombatEvent: CombatCallback | null = null) {
+    super();
+    this.onCombatEvent = onCombatEvent;
+  }
+
+  public update(dt: number, world: World): void {
+    const entities = world.getEntitiesWith(CombatState, Stats);
+
+    for (const entity of entities) {
+      const combatState = world.getComponent(entity, CombatState)!;
+      
+      // Mise à jour des cooldowns
+      for (const [abilityId, cooldown] of combatState.cooldowns.entries()) {
+        if (cooldown > 0) {
+          combatState.cooldowns.set(abilityId, Math.max(0, cooldown - dt));
+        }
+      }
+
+      // Mise à jour de l'incantation
+      if (combatState.casting) {
+        combatState.casting.remainingTime -= dt;
+        if (combatState.casting.remainingTime <= 0) {
+          this.executeAbility(entity, combatState.casting.abilityId, combatState.casting.targetId, world);
+          combatState.casting = null;
+        }
+      }
+    }
+  }
+
+  public useAbility(entityId: string, abilityId: string, targetId: string | null, world: World): boolean {
+    const combatState = world.getComponent(entityId, CombatState);
+    const stats = world.getComponent(entityId, Stats);
+    const ability = ABILITIES[abilityId];
+
+    if (!combatState || !stats || !ability) return false;
+
+    // Vérifier le cooldown
+    const currentCooldown = combatState.cooldowns.get(abilityId) || 0;
+    if (currentCooldown > 0) return false;
+
+    // Vérifier si déjà en train d'incanter
+    if (combatState.casting) return false;
+
+    // Vérifier les ressources
+    if (stats.mana < ability.manaCost || stats.stamina < ability.staminaCost) return false;
+
+    // Consommer les ressources
+    stats.mana -= ability.manaCost;
+    stats.stamina -= ability.staminaCost;
+
+    if (ability.castTime > 0) {
+      combatState.casting = {
+        abilityId,
+        remainingTime: ability.castTime,
+        totalTime: ability.castTime,
+        targetId
+      };
+    } else {
+      this.executeAbility(entityId, abilityId, targetId, world);
+    }
+
+    // Appliquer le cooldown
+    combatState.cooldowns.set(abilityId, ability.cooldown);
+
+    return true;
+  }
+
+  private executeAbility(sourceId: string, abilityId: string, targetId: string | null, world: World): void {
+    const ability = ABILITIES[abilityId];
+    if (!ability) return;
+
+    // Pour les soins, si pas de cible, on se soigne soi-même
+    const effectiveTargetId = (ability.type === AbilityType.HEAL && !targetId) ? sourceId : targetId;
+    
+    if (!effectiveTargetId) return;
+
+    const targetStats = world.getComponent(effectiveTargetId, Stats);
+    if (!targetStats) return;
+
+    if (ability.type === AbilityType.HEAL) {
+      const healAmount = ability.power;
+      targetStats.hp = Math.min(targetStats.maxHp, targetStats.hp + healAmount);
+      
+      if (this.onCombatEvent) {
+        this.onCombatEvent({
+          type: 'heal',
+          sourceId,
+          targetId: effectiveTargetId,
+          abilityId,
+          value: healAmount
+        });
+      }
+    } else {
+      const damageAmount = ability.power;
+      targetStats.hp = Math.max(0, targetStats.hp - damageAmount);
+      
+      if (this.onCombatEvent) {
+        this.onCombatEvent({
+          type: 'damage',
+          sourceId,
+          targetId: effectiveTargetId,
+          abilityId,
+          value: damageAmount
+        });
+      }
+
+      if (targetStats.hp <= 0) {
+        if (this.onCombatEvent) {
+          this.onCombatEvent({
+            type: 'death',
+            sourceId,
+            targetId: effectiveTargetId,
+            abilityId,
+            value: 0
+          });
+        }
+        // La destruction de l'entité sera gérée par le serveur suite à l'événement
+      }
+    }
+  }
+}
+
+
+
+================================================================================
+FILE: ./shared/src/systems/InventorySystem.ts
+================================================================================
+import { World } from '../ecs/World';
+import { System } from '../ecs/System';
+import { Inventory } from '../components/Inventory';
+import { ItemId, ITEMS, RECIPES, InventoryItem } from '../types/Items';
+
+export class InventorySystem extends System {
+    public update(dt: number, world: World): void {
+        // La logique de mise à jour périodique de l'inventaire si nécessaire
+    }
+
+    public addItem(entityId: string, itemId: ItemId, quantity: number, world: World): boolean {
+        const inventory = world.getComponent(entityId, Inventory);
+        if (!inventory) return false;
+
+        const itemDef = ITEMS[itemId];
+        if (!itemDef) return false;
+
+        if (itemDef.stackable) {
+            const existingItem = inventory.items.find((i: InventoryItem) => i.itemId === itemId);
+            if (existingItem) {
+                existingItem.quantity += quantity;
+                return true;
+            }
+        }
+
+        if (inventory.items.length < inventory.maxSize) {
+            inventory.items.push({ itemId, quantity });
+            return true;
+        }
+
+        return false;
+    }
+
+    public removeItem(entityId: string, itemId: ItemId, quantity: number, world: World): boolean {
+        const inventory = world.getComponent(entityId, Inventory);
+        if (!inventory) return false;
+
+        const itemIndex = inventory.items.findIndex((i: InventoryItem) => i.itemId === itemId);
+        if (itemIndex === -1) return false;
+
+        const item = inventory.items[itemIndex];
+        if (item.quantity < quantity) return false;
+
+        item.quantity -= quantity;
+        if (item.quantity === 0) {
+            inventory.items.splice(itemIndex, 1);
+        }
+
+        return true;
+    }
+
+    public hasItems(entityId: string, ingredients: { itemId: ItemId; quantity: number }[], world: World): boolean {
+        const inventory = world.getComponent(entityId, Inventory);
+        if (!inventory) return false;
+
+        for (const ingredient of ingredients) {
+            const item = inventory.items.find((i: InventoryItem) => i.itemId === ingredient.itemId);
+            if (!item || item.quantity < ingredient.quantity) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public craftItem(entityId: string, recipeId: string, world: World): boolean {
+        const recipe = RECIPES.find(r => r.id === recipeId);
+        if (!recipe) return false;
+
+        if (!this.hasItems(entityId, recipe.ingredients, world)) {
+            return false;
+        }
+
+        // Consommer les ingrédients
+        for (const ingredient of recipe.ingredients) {
+            this.removeItem(entityId, ingredient.itemId, ingredient.quantity, world);
+        }
+
+        // Ajouter le résultat
+        return this.addItem(entityId, recipe.result.itemId, recipe.result.quantity, world);
+    }
+}
+
+
+
+================================================================================
+FILE: ./shared/src/systems/MovementSystem.ts
+================================================================================
+import { System } from '../ecs/System';
+import { World } from '../ecs/World';
+import { Position } from '../components/Position';
+import { Velocity } from '../components/Velocity';
+import { Input } from '../components/Input';
+import { MAP_OBSTACLES } from '../constants/MapData';
+
+export class MovementSystem extends System {
+  private readonly MOVE_SPEED = 5;
+  private readonly PLAYER_RADIUS = 0.5;
+
+  public update(dt: number, world: World): void {
+    const entities = world.getEntitiesWith(Position, Velocity, Input);
+
+    for (const entity of entities) {
+      const pos = world.getComponent(entity, Position)!;
+      const vel = world.getComponent(entity, Velocity)!;
+      const input = world.getComponent(entity, Input)!;
+
+      // Calcul de la direction basée sur les inputs
+      let moveX = 0;
+      let moveZ = 0;
+
+      if (input.state.up) moveZ -= 1;
+      if (input.state.down) moveZ += 1;
+      if (input.state.left) moveX -= 1;
+      if (input.state.right) moveX += 1;
+
+      // Normalisation du vecteur de mouvement
+      if (moveX !== 0 || moveZ !== 0) {
+        const length = Math.sqrt(moveX * moveX + moveZ * moveZ);
+        moveX /= length;
+        moveZ /= length;
+      }
+
+      // Mise à jour de la vélocité
+      vel.vx = moveX * this.MOVE_SPEED;
+      vel.vz = moveZ * this.MOVE_SPEED;
+
+      // Prédiction de la nouvelle position
+      const nextX = pos.x + vel.vx * dt;
+      const nextZ = pos.z + vel.vz * dt;
+
+      // Collision simple (AABB)
+      let collisionX = false;
+      let collisionZ = false;
+
+      for (const obs of MAP_OBSTACLES) {
+        // Check X movement
+        if (this.checkCollision(nextX, pos.z, this.PLAYER_RADIUS, obs)) {
+          collisionX = true;
+        }
+        // Check Z movement
+        if (this.checkCollision(pos.x, nextZ, this.PLAYER_RADIUS, obs)) {
+          collisionZ = true;
+        }
+      }
+
+      if (!collisionX) pos.x = nextX;
+      if (!collisionZ) pos.z = nextZ;
+      
+      // Rotation simple vers la direction du mouvement
+      if (moveX !== 0 || moveZ !== 0) {
+        pos.rotationY = Math.atan2(moveX, moveZ);
+      }
+    }
+  }
+
+  private checkCollision(px: number, pz: number, radius: number, obs: any): boolean {
+    const obsMinX = obs.x - obs.w / 2;
+    const obsMaxX = obs.x + obs.w / 2;
+    const obsMinZ = obs.z - obs.d / 2;
+    const obsMaxZ = obs.z + obs.d / 2;
+
+    const closestX = Math.max(obsMinX, Math.min(px, obsMaxX));
+    const closestZ = Math.max(obsMinZ, Math.min(pz, obsMaxZ));
+
+    const distanceX = px - closestX;
+    const distanceZ = pz - closestZ;
+
+    const distanceSquared = (distanceX * distanceX) + (distanceZ * distanceZ);
+    return distanceSquared < (radius * radius);
+  }
+}
+
+
+
+================================================================================
+FILE: ./shared/src/systems/index.ts
+================================================================================
+export * from './MovementSystem';
+export * from './CombatSystem';
+export * from './InventorySystem';
+
+
+
+================================================================================
+FILE: ./shared/src/types/Abilities.ts
+================================================================================
+export enum AbilityType {
+  MELEE = 'MELEE',
+  SPELL = 'SPELL',
+  HEAL = 'HEAL'
+}
+
+export interface Ability {
+  id: string;
+  name: string;
+  type: AbilityType;
+  castTime: number; // en secondes
+  cooldown: number; // en secondes
+  manaCost: number;
+  staminaCost: number;
+  range: number;
+  power: number; // dégâts ou soins de base
+}
+
+export const ABILITIES: Record<string, Ability> = {
+  'melee_attack': {
+    id: 'melee_attack',
+    name: 'Melee Attack',
+    type: AbilityType.MELEE,
+    castTime: 0,
+    cooldown: 1.5,
+    manaCost: 0,
+    staminaCost: 5,
+    range: 50,
+    power: 10
+  },
+  'fireball': {
+    id: 'fireball',
+    name: 'Fireball',
+    type: AbilityType.SPELL,
+    castTime: 2.0,
+    cooldown: 0,
+    manaCost: 20,
+    staminaCost: 0,
+    range: 300,
+    power: 25
+  },
+  'heal': {
+    id: 'heal',
+    name: 'Heal',
+    type: AbilityType.HEAL,
+    castTime: 2.5,
+    cooldown: 5.0,
+    manaCost: 30,
+    staminaCost: 0,
+    range: 200,
+    power: 40
+  }
+};
+
+
+
+================================================================================
+FILE: ./shared/src/types/Items.ts
+================================================================================
+export type ItemId = string;
+
+export interface Item {
+    id: ItemId;
+    name: string;
+    description: string;
+    stackable: boolean;
+    maxStack?: number;
+}
+
+export interface InventoryItem {
+    itemId: ItemId;
+    quantity: number;
+}
+
+export interface Recipe {
+    id: string;
+    ingredients: { itemId: ItemId; quantity: number }[];
+    result: { itemId: ItemId; quantity: number };
+}
+
+export const ITEMS: Record<ItemId, Item> = {
+    'wood': {
+        id: 'wood',
+        name: 'Wood',
+        description: 'A piece of wood.',
+        stackable: true,
+        maxStack: 99
+    },
+    'iron': {
+        id: 'iron',
+        name: 'Iron',
+        description: 'A piece of iron ore.',
+        stackable: true,
+        maxStack: 99
+    },
+    'sword': {
+        id: 'sword',
+        name: 'Sword',
+        description: 'A sharp iron sword.',
+        stackable: false
+    },
+    'potion': {
+        id: 'potion',
+        name: 'Potion',
+        description: 'A healing potion.',
+        stackable: true,
+        maxStack: 10
+    }
+};
+
+export const RECIPES: Recipe[] = [
+    {
+        id: 'craft_sword',
+        ingredients: [
+            { itemId: 'wood', quantity: 1 },
+            { itemId: 'iron', quantity: 1 }
+        ],
+        result: { itemId: 'sword', quantity: 1 }
+    }
+];
+
+
+
+================================================================================
+FILE: ./shared/src/types/Quests.ts
+================================================================================
+export enum QuestObjectiveType {
+  KILL = 'Kill',
+  COLLECT = 'Collect',
+  TALK = 'Talk'
+}
+
+export interface QuestObjective {
+  type: QuestObjectiveType;
+  targetId: string; // Entity type ID or Item ID
+  requiredAmount: number;
+  currentAmount: number;
+  description: string;
+}
+
+export enum QuestStatus {
+  AVAILABLE = 'Available',
+  ACTIVE = 'Active',
+  COMPLETED = 'Completed',
+  REWARDED = 'Rewarded'
+}
+
+export interface Quest {
+  id: string;
+  title: string;
+  description: string;
+  objectives: QuestObjective[];
+  rewards: {
+    exp?: number;
+    gold?: number;
+    items?: { itemId: string; amount: number }[];
+  };
+  status: QuestStatus;
+}
+
+
+
+================================================================================
+FILE: ./shared/tsconfig.json
+================================================================================
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "include": ["src/**/*"]
+}
+
+
+
+================================================================================
+FILE: ./tsconfig.json
+================================================================================
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "sourceMap": true,
+    "composite": true
+  }
+}
+
+
+

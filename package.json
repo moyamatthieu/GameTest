@@ -1,11 +1,21 @@
 {
-  "name": "ssv-network",
-  "version": "0.9.7",
-  "description": "SSV CORE - Maillage Spatial Distribué P2P avec Three.js et PeerJS",
+  "name": "daoc-clone",
   "private": true,
+  "workspaces": [
+    "client",
+    "server",
+    "shared"
+  ],
   "scripts": {
-    "start": "python3 server.py",
-    "dev": "python3 server.py"
+    "predev": "kill-port 3000 5000",
+    "client:dev": "npm run dev -w client",
+    "server:dev": "npm run dev -w server",
+    "dev": "concurrently \"npm run client:dev\" \"npm run server:dev\"",
+    "build": "npm run build -w shared && npm run build -w server && npm run build -w client"
   },
-  "dependencies": {}
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "kill-port": "^2.0.1",
+    "typescript": "^5.3.3"
+  }
 }
