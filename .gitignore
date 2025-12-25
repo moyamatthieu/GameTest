@@ -36,3 +36,8 @@ Thumbs.db
 # Qdrant storage (dev tools)
 dev-tools/qdrant_storage/
 
+# Spec Kit - Protect GitHub Copilot secrets
+# (tokens, credentials, auth artifacts)
+.github/agents/
+.github/prompts/.secrets/
+

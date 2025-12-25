@@ -26,6 +26,28 @@ Pour comprendre le projet en profondeur, consultez les documents suivants :
 - [**ROADMAP.md**](ROADMAP.md) : État actuel du développement et objectifs futurs.
 - [**REFACTORING_NOTES.md**](REFACTORING_NOTES.md) : 🆕 Détails de la refactorisation majeure (Architecture Serveur-Authoritative).
 - [**USAGE_GUIDE.md**](USAGE_GUIDE.md) : 🆕 Guide pratique pour développer avec la nouvelle architecture.
+- [**SPEC_KIT_GUIDE.md**](SPEC_KIT_GUIDE.md) : 🆕 Guide d'utilisation de Spec Kit (Spec-Driven Development).
+
+## 🛠️ Développement avec Spec Kit
+
+Ce projet utilise **Spec Kit** pour un développement structuré et basé sur des spécifications exécutables.
+
+### Commandes Principales (dans GitHub Copilot)
+
+```bash
+/speckit.specify        # Créer une nouvelle spécification de feature
+/speckit.plan           # Générer un plan d'implémentation technique
+/speckit.tasks          # Décomposer en tâches actionnables
+/speckit.implement      # Exécuter automatiquement l'implémentation
+```
+
+### Exemple : Ajouter une Feature
+
+1. **Spécifier** : `/speckit.specify Ajouter un système de commerce galactique`
+2. **Planifier** : `/speckit.plan Utiliser Fleet + nouveau composant Trade`
+3. **Implémenter** : `/speckit.tasks` puis `/speckit.implement`
+
+**📚 Voir [SPEC_KIT_GUIDE.md](SPEC_KIT_GUIDE.md) pour un guide complet.**
 
 ## �️ Stack Technique
 
