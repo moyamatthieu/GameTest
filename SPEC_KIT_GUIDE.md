@@ -37,8 +37,8 @@ Vos principes de projet sont déjà établis dans `.specify/memory/constitution.
 Utilisez la commande slash `/speckit.specify` dans GitHub Copilot :
 
 ```
-/speckit.specify Ajouter un système de commerce interplanétaire où les joueurs peuvent 
-échanger des ressources entre planètes. Le système doit gérer les flottes de transport, 
+/speckit.specify Ajouter un système de commerce interplanétaire où les joueurs peuvent
+échanger des ressources entre planètes. Le système doit gérer les flottes de transport,
 les prix dynamiques basés sur l'offre et la demande, et les temps de trajet.
 ```
 
@@ -51,7 +51,7 @@ les prix dynamiques basés sur l'offre et la demande, et les temps de trajet.
 Si des points sont ambigus :
 
 ```
-/speckit.clarify Comment gérer les collisions de flottes ? Que se passe-t-il si une 
+/speckit.clarify Comment gérer les collisions de flottes ? Que se passe-t-il si une
 planète manque de ressources pendant un trajet ?
 ```
 
@@ -59,8 +59,8 @@ planète manque de ressources pendant un trajet ?
 Fournissez votre stack technique :
 
 ```
-/speckit.plan Utiliser le composant Fleet existant et créer un nouveau composant Trade. 
-Ajouter TradeSystem dans common/ecs/systems/. Côté client, créer TradeUI dans src/ui/. 
+/speckit.plan Utiliser le composant Fleet existant et créer un nouveau composant Trade.
+Ajouter TradeSystem dans common/ecs/systems/. Côté client, créer TradeUI dans src/ui/.
 Utiliser MessagePack pour les messages de trade.
 ```
 
@@ -127,14 +127,14 @@ Exécuter automatiquement toutes les tâches :
 
 **Étape 1 - Spécifier :**
 ```
-/speckit.specify Ajouter un système de diplomatie permettant aux joueurs d'établir des 
-relations avec des factions NPC. Gérer la réputation (-100 à +100), les traités 
+/speckit.specify Ajouter un système de diplomatie permettant aux joueurs d'établir des
+relations avec des factions NPC. Gérer la réputation (-100 à +100), les traités
 (paix, commerce, alliance), et les événements diplomatiques aléatoires.
 ```
 
 **Étape 2 - Clarifier (si besoin) :**
 ```
-/speckit.clarify Comment la réputation affecte-t-elle les prix de commerce ? 
+/speckit.clarify Comment la réputation affecte-t-elle les prix de commerce ?
 Quels sont les critères pour proposer un traité ?
 ```
 

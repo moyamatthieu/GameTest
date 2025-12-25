@@ -23,8 +23,13 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/cors": "^2.8.19",
+    "@types/dotenv": "^6.1.1",
+    "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^25.0.3",
+    "@types/socket.io": "^3.0.1",
     "@types/three": "^0.182.0",
     "concurrently": "^9.2.1",
     "eslint": "^9.39.2",
