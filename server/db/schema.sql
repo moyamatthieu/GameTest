@@ -1,0 +1,16 @@
+CREATE TABLE IF NOT EXISTS players (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT UNIQUE,
+  last_login DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS entities (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT,
+  owner_id INTEGER,
+  x REAL,
+  y REAL,
+  z REAL,
+  data TEXT,
+  FOREIGN KEY(owner_id) REFERENCES players(id)
+);

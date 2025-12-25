@@ -1,0 +1,73 @@
+# Jeux Gestion (Three.js RTS)
+
+Un MMORTS spatial persistant en 3D développé avec Three.js, Node.js et une architecture ECS.
+
+## 🚀 Démarrage rapide
+
+### Installation
+```bash
+npm install
+cd server && npm install
+```
+
+### Développement
+```bash
+# Lance le client et le serveur simultanément
+npm run dev:all
+```
+Le client est accessible sur http://localhost:3000 et le serveur sur http://localhost:3001.
+
+## 📖 Documentation
+
+Pour comprendre le projet en profondeur, consultez les documents suivants :
+
+- [**ARCHITECTURE.md**](ARCHITECTURE.md) : Détails techniques, architecture ECS et structure du moteur.
+- [**GAME_DESIGN.md**](GAME_DESIGN.md) : Vision du jeu, mécaniques de gameplay et systèmes économiques.
+- [**ROADMAP.md**](ROADMAP.md) : État actuel du développement et objectifs futurs.
+- [**REFACTORING_NOTES.md**](REFACTORING_NOTES.md) : 🆕 Détails de la refactorisation majeure (Architecture Serveur-Authoritative).
+- [**USAGE_GUIDE.md**](USAGE_GUIDE.md) : 🆕 Guide pratique pour développer avec la nouvelle architecture.
+
+## �️ Stack Technique
+
+- **Frontend** : [Three.js](https://threejs.org/) (Rendu 3D), [Vite](https://vitejs.dev/) (Build tool).
+- **Backend** : [Node.js](https://nodejs.org/), [WebSockets](https://github.com/websockets/ws) (Communication temps réel).
+- **Base de données** : [SQLite](https://www.sqlite.org/) (Persistance des entités via JSON).
+- **Architecture** : ECS (Entity Component System) avec bitmasks pour des performances optimales.
+
+## 📁 Structure du projet
+
+```
+jeux_gestion/
+├── common/             # Logique partagée (ECS, Systèmes, Composants)
+│   └── ecs/
+│       ├── components.js
+│       ├── World.js
+│       └── systems/    # ⚡ TOUTE la logique métier (serveur uniquement)
+├── server/             # Serveur Node.js & SQLite
+│   ├── ecs/            # ServerWorld avec tous les systèmes
+│   └── db/             # Persistence SQLite
+├── src/                # Client Three.js
+│   ├── core/           # Game, NetworkManager, AssetManager
+│   ├── render/         # 🆕 Systèmes de rendu (MeshSync, etc.)
+│   ├── input/          # 🆕 Gestionnaires d'input (BuildingPlacer, etc.)
+│   ├── scenes/         # Scènes Three.js (Planet, System, Galaxy)
+│   └── ui/             # Interface HTML/CSS
+├── public/             # Assets statiques
+└── plans/              # Archives et documents de planification
+```
+
+**⚠️ Important :** Le client (`src/`) ne contient **AUCUNE logique de simulation**.
+Toute la logique métier est dans `common/ecs/systems/` et exécutée uniquement par le serveur.
+
+## 🎮 Fonctionnalités principales
+
+- **Économie Complexe** : Chaînes de production, gestion des ressources et stockage.
+- **Système de Flottes** : Gestion de groupes de vaisseaux et ordres de mouvement.
+- **Combat Tactique** : Boucliers directionnels et gestion des dégâts.
+- **Souveraineté** : Contrôle de territoires et influence.
+- **Multi-échelles** : Navigation entre les échelles Galactique, Système et Planétaire.
+- **Construction Duale** : Système de placement intelligent sur surfaces planétaires (sphérique) et dans l'espace (grille orbitale).
+
+## 🤝 Licence
+
+Ce projet est sous licence MIT.

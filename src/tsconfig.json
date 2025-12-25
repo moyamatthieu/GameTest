@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "../dist/client",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"]
+  },
+  "references": [
+    { "path": "../common" }
+  ],
+  "include": ["**/*.ts", "**/*.js", "**/*.html"],
+  "exclude": ["node_modules"]
+}

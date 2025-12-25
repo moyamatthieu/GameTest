@@ -1,0 +1,20 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "description": "Backend for Jeux Gestion",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "@msgpack/msgpack": "^3.1.2",
+    "better-sqlite3": "*",
+    "cors": "*",
+    "dotenv": "*",
+    "express": "*",
+    "protobufjs": "^8.0.0",
+    "socket.io": "*"
+  }
+}

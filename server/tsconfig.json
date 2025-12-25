@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "../dist/server",
+    "lib": ["ESNext"]
+  },
+  "references": [
+    { "path": "../common" }
+  ],
+  "include": ["**/*.ts", "**/*.js"],
+  "exclude": ["node_modules", "test.cjs", "test.mjs"]
+}

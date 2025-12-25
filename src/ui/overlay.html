@@ -1,0 +1,92 @@
+<div id="ui-layer">
+  <div id="debug-panel">
+    <h3>Galactic Dominion (Dev)</h3>
+    <div id="player-info">Joueur : <span id="player-name-display">Invité</span></div>
+    <p>Touches :</p>
+    <ul>
+      <li><strong>1</strong> : Vue Planète (Micro)</li>
+      <li><strong>2</strong> : Vue Système (Meso)</li>
+      <li><strong>3</strong> : Vue Galaxie (Macro)</li>
+    </ul>
+    <div id="scene-info">Scène actuelle : <span id="current-scene-name">planet</span></div>
+  </div>
+
+  <nav id="scene-nav">
+    <button id="nav-planet" class="nav-btn active">Planète</button>
+    <button id="nav-system" class="nav-btn">Système</button>
+    <button id="nav-galaxy" class="nav-btn">Galaxie</button>
+  </nav>
+
+  <div id="fleet-panel" class="ui-panel fleet-panel">
+    <h3>Gestion de Flotte</h3>
+    <div id="fleet-list">
+      <!-- Dynamiquement rempli -->
+    </div>
+    <div id="fleet-controls">
+      <button id="btn-formation-circle">Cercle</button>
+      <button id="btn-formation-line">Ligne</button>
+      <button id="btn-formation-delta">Delta</button>
+      <button id="btn-jump">Saut Hyper</button>
+    </div>
+  </div>
+
+  <div id="production-panel" class="ui-panel">
+    <h3>Chaînes de Production</h3>
+    <div id="production-list">
+      <!-- Dynamiquement rempli -->
+    </div>
+  </div>
+
+  <div id="corporation-panel" class="ui-panel">
+    <h3>Corporation</h3>
+    <div id="corp-info">
+      <div id="corp-name">Chargement...</div>
+      <div id="corp-treasury">Trésorerie : 0 Cr</div>
+    </div>
+    <div id="corp-assets">
+      <h4>Possessions</h4>
+      <ul id="asset-list"></ul>
+    </div>
+  </div>
+
+  <div id="construction-panel" class="ui-panel">
+    <h3>🏗️ Construction</h3>
+    <div id="resources-info">
+      <div>💎 Métal : <span id="metal-count">0</span></div>
+      <div>⚡ Énergie : <span id="energy-count">0</span></div>
+    </div>
+    <div id="building-list">
+      <button class="build-btn" data-type="base" title="Base principale (100 métal)">
+        🏛️ Base
+      </button>
+      <button class="build-btn" data-type="habitation" title="Logements (30 métal)">
+        🏠 Habitation
+      </button>
+      <button class="build-btn" data-type="ferme" title="Production de nourriture (40 métal)">
+        🌾 Ferme
+      </button>
+      <button class="build-btn" data-type="usine" title="Production industrielle (60 métal)">
+        🏭 Usine
+      </button>
+      <button class="build-btn" data-type="entrepot" title="Stockage (50 métal)">
+        📦 Entrepôt
+      </button>
+      <button class="build-btn" data-type="centrale" title="Production d'énergie (80 métal)">
+        ⚡ Centrale
+      </button>
+      <button class="build-btn" data-type="mine" title="Extraction de ressources (120 métal)">
+        ⛏️ Mine
+      </button>
+    </div>
+    <div id="construction-info">
+      <p class="help-text">💡 Cliquez sur un bâtiment puis placez-le sur la planète</p>
+      <p class="help-text">🖱️ Clic gauche : Placer | ESC : Annuler</p>
+    </div>
+  </div>
+
+  <!-- Panneau d'information de placement intelligent -->
+  <div id="placement-info" class="ui-panel placement-panel">
+    <h4>📍 Validation de Placement</h4>
+    <!-- Contenu dynamique généré par BuildingPlacer -->
+  </div>
+</div>
