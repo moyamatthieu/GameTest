@@ -1,0 +1,7 @@
+.selectBox {
+  position: absolute;
+  border: 1px solid #55aaff;
+  background-color: rgba(85, 170, 255, 0.2);
+  pointer-events: none;
+  z-index: 1000;
+}

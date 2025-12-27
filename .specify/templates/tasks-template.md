@@ -12,6 +12,15 @@ description: "Task list template for feature implementation"
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
+**RTS-Specific Task Categories**: When implementing RTS features, consider these common task types:
+- **ECS Tasks**: Creating components, systems, or entities (e.g., "Create PositionComponent", "Implement MovementSystem")
+- **Pathfinding Tasks**: Grid generation, A* implementation, obstacle detection
+- **Input Tasks**: Mouse/keyboard capture, box selection, contextual order detection
+- **Rendering Tasks**: Three.js scene setup, top-down camera positioning, unit visualization
+- **P2P Sync Tasks**: State serialization, validation consensus, conflict resolution
+- **UI Tasks**: HUD elements, minimap, control groups UI, build menus
+- **Construction Tasks**: Building placement preview, rally points, production queues
+
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: Can run in parallel (different files, no dependencies)

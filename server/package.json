@@ -1,20 +1,18 @@
 {
-  "name": "server",
-  "version": "1.0.0",
-  "description": "Backend for Jeux Gestion",
+  "name": "jeux-gestion-server",
+  "private": true,
   "type": "module",
-  "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node --watch index.js"
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "smoke-test": "tsx scripts/smoke-test.ts"
   },
   "dependencies": {
-    "@msgpack/msgpack": "^3.1.2",
-    "better-sqlite3": "*",
-    "cors": "*",
-    "dotenv": "*",
-    "express": "*",
-    "protobufjs": "^8.0.0",
-    "socket.io": "*"
+    "bs58": "^6.0.0",
+    "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.9.3"
   }
 }

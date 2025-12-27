@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RTSCommand",
+  "type": "object",
+  "properties": {
+    "issuer": { "type": "string", "description": "Public key of the player" },
+    "signature": { "type": "string", "description": "Ed25519 signature" },
+    "tick": { "type": "integer", "description": "Game tick for execution" },
+    "type": {
+      "type": "string",
+      "enum": ["MOVE", "ATTACK", "HARVEST", "STOP", "PATROL"]
+    },
+    "subjectIds": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "targetPosition": {
+      "type": "object",
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" }
+      },
+      "required": ["x", "y", "z"]
+    },
+    "targetEntityId": { "type": "string" }
+  },
+  "required": ["issuer", "signature", "tick", "type", "subjectIds", "targetPosition"]
+}

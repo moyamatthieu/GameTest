@@ -1,95 +1,87 @@
-# Jeux Gestion (Three.js RTS)
+# MMORTS - RTS Multi-Échelle avec Architecture P2P
 
-Un MMORTS spatial persistant en 3D développé avec Three.js, Node.js et une architecture ECS.
+Un jeu de stratégie en temps réel (RTS) massivement multijoueur avec architecture Peer-to-Peer (P2P) décentralisée et validation distribuée. Le joueur commande des flottes, gère des bases, et développe un empire galactique à travers trois échelles tactiques (Galaxy, System, Planet).
 
-## 🚀 Démarrage rapide
+## 🎮 Paradigme de Jeu
+
+Ce jeu est un **RTS pur** où le joueur donne des **ordres** à des unités (comme StarCraft ou Supreme Commander), **PAS** un jeu de pilotage direct ou simulateur spatial.
+
+**Contrôles RTS Standards**:
+- **Clic gauche** : Sélection d'unités
+- **Clic gauche + glisser** : Box selection (groupes)
+- **Clic droit** : Ordre contextuel (déplacement, attaque, extraction)
+- **Touches 1-0** : Groupes de contrôle
+- **Shift + clic** : File d'attente d'ordres
+
+**Vue Top-Down Stricte** : Caméra toujours au-dessus de la scène (angle 60-90°) pour lisibilité tactique maximale.
+
+## 🚀 Démarrage Rapide
+
+### Prérequis
+- Node.js (v18+)
+- npm
 
 ### Installation
 ```bash
 npm install
-cd server && npm install
 ```
 
-### Développement
+### Développement (Frontend)
 ```bash
-# Lance le client et le serveur simultanément
-npm run dev:all
+npm run dev
 ```
-Le client est accessible sur http://localhost:3000 et le serveur sur http://localhost:3001.
+L'application sera disponible sur `http://localhost:5173`.
 
-## 📖 Documentation
-
-Pour comprendre le projet en profondeur, consultez les documents suivants :
-
-- [**ARCHITECTURE.md**](ARCHITECTURE.md) : Détails techniques, architecture ECS et structure du moteur.
-- [**GAME_DESIGN.md**](GAME_DESIGN.md) : Vision du jeu, mécaniques de gameplay et systèmes économiques.
-- [**ROADMAP.md**](ROADMAP.md) : État actuel du développement et objectifs futurs.
-- [**REFACTORING_NOTES.md**](REFACTORING_NOTES.md) : 🆕 Détails de la refactorisation majeure (Architecture Serveur-Authoritative).
-- [**USAGE_GUIDE.md**](USAGE_GUIDE.md) : 🆕 Guide pratique pour développer avec la nouvelle architecture.
-- [**SPEC_KIT_GUIDE.md**](SPEC_KIT_GUIDE.md) : 🆕 Guide d'utilisation de Spec Kit (Spec-Driven Development).
-
-## 🛠️ Développement avec Spec Kit
-
-Ce projet utilise **Spec Kit** pour un développement structuré et basé sur des spécifications exécutables.
-
-### Commandes Principales (dans GitHub Copilot)
-
+### Serveur de Persistance (Optionnel en local)
+Le serveur gère l'hébergement des fichiers statiques et la persistance de secours.
 ```bash
-/speckit.specify        # Créer une nouvelle spécification de feature
-/speckit.plan           # Générer un plan d'implémentation technique
-/speckit.tasks          # Décomposer en tâches actionnables
-/speckit.implement      # Exécuter automatiquement l'implémentation
+cd server
+npm install
+npm run build
+npm start
 ```
 
-### Exemple : Ajouter une Feature
+## 🧪 Tests
 
-1. **Spécifier** : `/speckit.specify Ajouter un système de commerce galactique`
-2. **Planifier** : `/speckit.plan Utiliser Fleet + nouveau composant Trade`
-3. **Implémenter** : `/speckit.tasks` puis `/speckit.implement`
+Le projet utilise **Vitest** pour les tests unitaires et d'intégration, et **Playwright** pour les tests de bout en bout (E2E).
 
-**📚 Voir [SPEC_KIT_GUIDE.md](SPEC_KIT_GUIDE.md) pour un guide complet.**
-
-## �️ Stack Technique
-
-- **Frontend** : [Three.js](https://threejs.org/) (Rendu 3D), [Vite](https://vitejs.dev/) (Build tool).
-- **Backend** : [Node.js](https://nodejs.org/), [WebSockets](https://github.com/websockets/ws) (Communication temps réel).
-- **Base de données** : [SQLite](https://www.sqlite.org/) (Persistance des entités via JSON).
-- **Architecture** : ECS (Entity Component System) avec bitmasks pour des performances optimales.
-
-## 📁 Structure du projet
-
-```
-jeux_gestion/
-├── common/             # Logique partagée (ECS, Systèmes, Composants)
-│   └── ecs/
-│       ├── components.js
-│       ├── World.js
-│       └── systems/    # ⚡ TOUTE la logique métier (serveur uniquement)
-├── server/             # Serveur Node.js & SQLite
-│   ├── ecs/            # ServerWorld avec tous les systèmes
-│   └── db/             # Persistence SQLite
-├── src/                # Client Three.js
-│   ├── core/           # Game, NetworkManager, AssetManager
-│   ├── render/         # 🆕 Systèmes de rendu (MeshSync, etc.)
-│   ├── input/          # 🆕 Gestionnaires d'input (BuildingPlacer, etc.)
-│   ├── scenes/         # Scènes Three.js (Planet, System, Galaxy)
-│   └── ui/             # Interface HTML/CSS
-├── public/             # Assets statiques
-└── plans/              # Archives et documents de planification
+### Tests Unitaires et Intégration
+```bash
+npm test
 ```
 
-**⚠️ Important :** Le client (`src/`) ne contient **AUCUNE logique de simulation**.
-Toute la logique métier est dans `common/ecs/systems/` et exécutée uniquement par le serveur.
+### Tests du Serveur de Persistance
+```bash
+npm run test:server
+```
 
-## 🎮 Fonctionnalités principales
+### Tests E2E (Playwright)
+```bash
+npx playwright test
+```
 
-- **Économie Complexe** : Chaînes de production, gestion des ressources et stockage.
-- **Système de Flottes** : Gestion de groupes de vaisseaux et ordres de mouvement.
-- **Combat Tactique** : Boucliers directionnels et gestion des dégâts.
-- **Souveraineté** : Contrôle de territoires et influence.
-- **Multi-échelles** : Navigation entre les échelles Galactique, Système et Planétaire.
-- **Construction Duale** : Système de placement intelligent sur surfaces planétaires (sphérique) et dans l'espace (grille orbitale).
+## 📁 Structure du Projet
 
-## 🤝 Licence
+- `src/core/world/`: Génération déterministe de l'univers (Lattice, Routes, Heightmaps)
+- `src/ecs/`: Architecture Entity-Component-System pour la logique RTS
+  - `components/`: Données pures (Position, Health, Owner, etc.)
+  - `systems/`: Logique de simulation (MovementSystem, CombatSystem, PathfindingSystem)
+- `src/renderer/`: Moteurs de rendu multi-échelle (Galaxie, Système, Planète) avec Three.js
+- `src/ui/input/`: Capture des contrôles RTS (box selection, ordres contextuels, groupes)
+- `server/`: Serveur de persistance non-autoritaire (hébergement + snapshots signés)
+- `specs/`: Spécifications détaillées des fonctionnalités
+- `tests/`: Suites de tests automatisés (unit, integration, E2E)
 
-Ce projet est sous licence MIT.
+## 📜 Principes du Projet
+Consultez la [Constitution](.specify/memory/constitution.md) pour comprendre les choix architecturaux et les règles de développement.
+
+**Principes clés** :
+- **RTS Pur** : Contrôle par ordres, pas de pilotage direct (Principes XII, XV)
+- **Architecture ECS** : Séparation stricte logique/rendu/input (Principe XIV)
+- **Pathfinding sur Grille** : Navigation intelligente, pas de physique spatiale (Principe XVI)
+- **P2P Décentralisé** : Validation distribuée par consensus (Principe I)
+- **Multi-Échelle** : Galaxy → System → Planet avec vue top-down à chaque niveau (Principe II)
+- **Construction RTS** : Preview-placement-queue pour bâtiments et unités (Principe XVII)
+
+---
+*Inspiré par Mankind (1998), StarCraft, et Supreme Commander*

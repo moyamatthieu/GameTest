@@ -1,0 +1,65 @@
+openapi: 3.0.0
+info:
+  title: Persistence Server API
+  version: 1.0.0
+paths:
+  /persistence/snapshot:
+    post:
+      summary: Upload a signed snapshot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignedPayload'
+      responses:
+        '200':
+          description: Snapshot saved successfully
+        '400':
+          description: Invalid signature or payload
+        '429':
+          description: Rate limit exceeded
+
+  /persistence/snapshot/latest:
+    get:
+      summary: Retrieve the latest snapshot for a cluster
+      parameters:
+        - name: clusterId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Latest snapshot returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Snapshot'
+        '404':
+          description: No snapshot found for this cluster
+
+components:
+  schemas:
+    SignedPayload:
+      type: object
+      required: [payload, signature, publicKey, timestamp]
+      properties:
+        payload:
+          type: string
+        signature:
+          type: string
+        publicKey:
+          type: string
+        timestamp:
+          type: number
+    Snapshot:
+      type: object
+      required: [clusterId, tick, state]
+      properties:
+        clusterId:
+          type: string
+        tick:
+          type: number
+        state:
+          type: object

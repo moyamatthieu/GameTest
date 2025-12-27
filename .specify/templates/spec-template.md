@@ -113,3 +113,23 @@
 - **SC-002**: [Measurable metric, e.g., "System handles 1000 concurrent users without degradation"]
 - **SC-003**: [User satisfaction metric, e.g., "90% of users successfully complete primary task on first attempt"]
 - **SC-004**: [Business metric, e.g., "Reduce support tickets related to [X] by 50%"]
+
+## Constitution Alignment
+
+**RTS Paradigm Validation** (NON-NEGOTIABLE):
+
+- [ ] **Top-Down View**: Does this feature maintain strict top-down camera perspective? (NO cockpit/first-person views)
+- [ ] **Order-Based Control**: Are units controlled via orders (Move, Attack, Build), NOT direct player input?
+- [ ] **Pathfinding Navigation**: Does unit movement use grid/navmesh pathfinding, NOT physics-based propulsion?
+- [ ] **ECS Architecture**: Is the feature designed with Entity-Component-System separation (logic vs rendering vs input)?
+- [ ] **RTS Controls**: Are interactions designed for standard RTS controls (box selection, right-click contextual, control groups)?
+- [ ] **Construction System**: Do buildings follow the preview-placement-queue paradigm?
+- [ ] **P2P Architecture**: Is the data model compatible with distributed validation and deterministic simulation?
+- [ ] **Persistence Fallback**: Can state be serialized to signed snapshots/logs for recovery after total P2P loss?
+
+**RTS-Specific User Story Examples** (for reference):
+- "As a player, I want to select multiple units with a box selection, so that I can command groups efficiently"
+- "As a player, I want to right-click on an enemy to attack, so that I can issue combat orders intuitively"
+- "As a player, I want to assign units to control groups (1-0), so that I can manage large armies tactically"
+- "As a player, I want to see a top-down view of my base, so that I can plan construction layouts strategically"
+- "As a player, I want to queue unit production in factories, so that I can automate military buildup"

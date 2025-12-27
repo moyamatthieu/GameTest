@@ -1,98 +1,15 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>jeux_gestion</title>
+    <title>Constitution MMORTS</title>
   </head>
   <body>
-    <div id="ui-layer">
-      <!-- Top Bar: Resources & Global Info -->
-      <div id="top-bar">
-        <div id="game-title">Galactic Dominion</div>
-        <div id="resource-display">
-          <div class="res-item"><span class="res-icon">🔩</span> <span id="res-metal">0</span></div>
-          <div class="res-item"><span class="res-icon">⚡</span> <span id="res-energy">0</span></div>
-          <div class="res-item"><span class="res-icon">💳</span> <span id="res-credits">0</span></div>
-        </div>
-        <div id="system-time">00:00</div>
-      </div>
-
-      <!-- Main View Area (Canvas is behind) -->
-
-      <!-- Bottom Bar: Controls & Info -->
-      <div id="bottom-bar">
-        <!-- Left: Minimap -->
-        <div id="minimap-container">
-          <canvas id="minimap-canvas" width="200" height="200"></canvas>
-          <div id="scene-indicator">Planet</div>
-        </div>
-
-        <!-- Center: Actions & Navigation -->
-        <div id="action-bar">
-          <nav id="scene-nav">
-            <button id="nav-planet" class="nav-btn active">Planète</button>
-            <button id="nav-system" class="nav-btn">Système</button>
-            <button id="nav-galaxy" class="nav-btn">Galaxie</button>
-          </nav>
-          
-          <div id="build-menu" class="hidden">
-            <div class="menu-title">Construction</div>
-            <div class="build-grid">
-              <button class="build-btn" data-type="base" title="Base Centrale (100 M)">Base</button>
-              <button class="build-btn" data-type="habitation" title="Habitation (30 M)">Habitation</button>
-              <button class="build-btn" data-type="ferme" title="Ferme (40 M)">Ferme</button>
-              <button class="build-btn" data-type="usine" title="Usine (60 M)">Usine</button>
-              <button class="build-btn" data-type="entrepot" title="Entrepôt (50 M)">Entrepôt</button>
-              <button class="build-btn" data-type="centrale" title="Centrale (80 M)">Centrale</button>
-              <button class="build-btn" data-type="mine" title="Mine (120 M)">Mine</button>
-              <button class="build-btn" data-type="route" title="Route (5 M)">Route</button>
-            </div>
-          </div>
-
-          <div id="logistics-menu" class="hidden">
-            <div class="menu-title">Logistique</div>
-            <button class="logistics-btn" data-resource="metal" data-amount="10">Envoyer 10 Métal</button>
-            <button class="logistics-btn" data-resource="energy" data-amount="10">Envoyer 10 Énergie</button>
-            <div id="active-transfers"></div>
-          </div>
-        </div>
-
-        <!-- Right: Selection Info -->
-        <div id="info-panel">
-          <div id="selection-header">
-            <h3 id="selection-name">Aucune sélection</h3>
-          </div>
-          <div id="selection-content">
-            <div id="selection-details" class="hidden">
-              <div id="selection-owner" class="owner-info">Propriétaire : Aucun</div>
-              <div id="hp-bar-container" class="bar-container">
-                <div class="bar-label">Structure</div>
-                <div class="bar-bg"><div id="hp-bar-fill" class="bar-fill hp"></div></div>
-              </div>
-              <div id="shield-bar-container" class="bar-container">
-                <div class="bar-label">Bouclier</div>
-                <div class="bar-bg"><div id="shield-bar-fill" class="bar-fill shield"></div></div>
-              </div>
-              <div id="combat-actions">
-                <button id="attack-btn">Attaquer</button>
-              </div>
-            </div>
-            <div id="default-info">
-              <p>Sélectionnez une unité ou un bâtiment pour voir les détails.</p>
-            </div>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Debug / Dev Overlay (Optional, kept for dev) -->
-      <div id="debug-panel" style="display:none;">
-        <div id="scene-info">Scène actuelle : <span id="current-scene-name">planet</span></div>
-      </div>
+    <div id="ui" style="position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; font-family: sans-serif; z-index: 100;">
+      <div>Mon ID: <span id="peer-id">...</span></div>
+      <div id="status" style="margin-top: 10px; font-size: 0.8em;">Connexion automatique...</div>
     </div>
-    <div id="scene-transition"></div>
-    <div id="app"></div>
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

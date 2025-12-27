@@ -1,0 +1,11 @@
+# local env
+.env
+
+# build output
+/dist
+
+# dependencies
+/node_modules
+
+# persisted data (created by later phases)
+/data

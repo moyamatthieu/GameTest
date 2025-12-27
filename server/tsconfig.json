@@ -1,13 +1,15 @@
 {
-  "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": ".",
-    "outDir": "../dist/server",
-    "lib": ["ESNext"]
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": "src",
+    "outDir": "dist",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "resolveJsonModule": true
   },
-  "references": [
-    { "path": "../common" }
-  ],
-  "include": ["**/*.ts", "**/*.js"],
-  "exclude": ["node_modules", "test.cjs", "test.mjs"]
+  "include": ["src/**/*.ts"]
 }

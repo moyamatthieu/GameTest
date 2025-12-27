@@ -32,6 +32,18 @@
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
 [Gates determined based on constitution file]
+<!-- 
+RTS-Specific Validation Gates:
+✅ Top-Down View: Feature maintains strict top-down perspective (no cockpit/first-person view)
+✅ Order-Based Control: Units controlled by orders (Move, Attack, etc.), not direct player input
+✅ Pathfinding: Movement uses grid/navmesh pathfinding, not physics-based propulsion
+✅ ECS Architecture: Logic separated into Entities, Components, Systems
+✅ P2P Validation: Critical actions validated by distributed consensus
+✅ Deterministic: Same inputs + same state = same result (required for P2P sync)
+✅ RTS Controls: Box selection, right-click contextual orders, control groups (1-0)
+✅ Construction: Buildings placed via preview mode, units produced in queues
+✅ Persistence Fallback: Server stores signed snapshots but does not simulate
+-->
 
 ## Project Structure
 

@@ -2,6 +2,7 @@
   <div id="debug-panel">
     <h3>Galactic Dominion (Dev)</h3>
     <div id="player-info">Joueur : <span id="player-name-display">Invité</span></div>
+    <div id="persistence-info">Persistance : <span id="persistence-status">Initialisation...</span></div>
     <p>Touches :</p>
     <ul>
       <li><strong>1</strong> : Vue Planète (Micro)</li>
@@ -17,7 +18,7 @@
     <button id="nav-galaxy" class="nav-btn">Galaxie</button>
   </nav>
 
-  <div id="fleet-panel" class="ui-panel fleet-panel">
+  <div id="fleet-panel" class="ui-panel" style="display: none;">
     <h3>Gestion de Flotte</h3>
     <div id="fleet-list">
       <!-- Dynamiquement rempli -->
@@ -85,7 +86,7 @@
   </div>
 
   <!-- Panneau d'information de placement intelligent -->
-  <div id="placement-info" class="ui-panel placement-panel">
+  <div id="placement-info" class="ui-panel placement-panel" style="display: none;">
     <h4>📍 Validation de Placement</h4>
     <!-- Contenu dynamique généré par BuildingPlacer -->
   </div>
